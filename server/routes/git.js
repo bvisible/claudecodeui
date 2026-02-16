@@ -5,7 +5,6 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import { extractProjectDirectory } from '../projects.js';
 import { queryClaudeSDK } from '../claude-sdk.js';
-import { spawnCursor } from '../cursor-cli.js';
 
 const router = express.Router();
 const execAsync = promisify(exec);
@@ -692,11 +691,6 @@ Generate the commit message:`;
         cwd: projectPath,
         permissionMode: 'bypassPermissions',
         model: 'sonnet'
-      }, writer);
-    } else if (provider === 'cursor') {
-      await spawnCursor(prompt, {
-        cwd: projectPath,
-        skipPermissions: true
       }, writer);
     }
 

@@ -8,7 +8,6 @@ import { useTranslation } from 'react-i18next';
 import CredentialsSettings from './CredentialsSettings';
 import GitSettings from './GitSettings';
 import TasksSettings from './TasksSettings';
-import LoginModal from './LoginModal';
 import { authenticatedFetch } from '../utils/api';
 
 // New settings components
@@ -1955,21 +1954,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
         </div>
       </div>
 
-      {/* Login Modal */}
-      <LoginModal
-        key={loginProvider}
-        isOpen={showLoginModal}
-        onClose={() => setShowLoginModal(false)}
-        provider={loginProvider}
-        project={selectedProject}
-        onComplete={handleLoginComplete}
-        isAuthenticated={
-          loginProvider === 'claude' ? claudeAuthStatus.authenticated :
-          loginProvider === 'cursor' ? cursorAuthStatus.authenticated :
-          loginProvider === 'codex' ? codexAuthStatus.authenticated :
-          false
-        }
-      />
+      {/* LoginModal removed — Frappe integration */}
     </div>
   );
 }

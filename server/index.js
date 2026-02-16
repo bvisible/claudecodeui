@@ -44,30 +44,22 @@ import mime from 'mime-types';
 
 import { getProjects, getSessions, getSessionMessages, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval } from './claude-sdk.js';
-import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
-import { queryCodex, abortCodexSession, isCodexSessionActive, getActiveCodexSessions } from './openai-codex.js';
 import gitRoutes from './routes/git.js';
-import authRoutes from './routes/auth.js';
 import mcpRoutes from './routes/mcp.js';
-import cursorRoutes from './routes/cursor.js';
-import taskmasterRoutes from './routes/taskmaster.js';
 import mcpUtilsRoutes from './routes/mcp-utils.js';
 import commandsRoutes from './routes/commands.js';
 import settingsRoutes from './routes/settings.js';
 import agentRoutes from './routes/agent.js';
 import projectsRoutes, { WORKSPACES_ROOT, validateWorkspacePath } from './routes/projects.js';
-import cliAuthRoutes from './routes/cli-auth.js';
 import userRoutes from './routes/user.js';
-import codexRoutes from './routes/codex.js';
-import { initializeDatabase } from './database/db.js';
-import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
-import { IS_PLATFORM } from './constants/config.js';
+import { frappeAuth, frappeVerifyClient } from './middleware/frappe-auth.js';
+
+// Frappe integration: auth is handled by Frappe session via middleware
+const IS_PLATFORM = true;
 
 // File system watchers for provider project/session folders
 const PROVIDER_WATCH_PATHS = [
-    { provider: 'claude', rootPath: path.join(os.homedir(), '.claude', 'projects') },
-    { provider: 'cursor', rootPath: path.join(os.homedir(), '.cursor', 'chats') },
-    { provider: 'codex', rootPath: path.join(os.homedir(), '.codex', 'sessions') }
+    { provider: 'claude', rootPath: path.join(os.homedir(), '.claude', 'projects') }
 ];
 const WATCHER_IGNORED_PATTERNS = [
     '**/node_modules/**',
@@ -275,47 +267,21 @@ function shouldAutoOpenUrlFromOutput(value = '') {
 }
 
 // Single WebSocket server that handles both paths
+// Frappe integration: validate session cookie on WebSocket upgrade
 const wss = new WebSocketServer({
     server,
-    verifyClient: (info) => {
-        console.log('WebSocket connection attempt to:', info.req.url);
-
-        // Platform mode: always allow connection
-        if (IS_PLATFORM) {
-            const user = authenticateWebSocket(null); // Will return first user
-            if (!user) {
-                console.log('[WARN] Platform mode: No user found in database');
-                return false;
-            }
-            info.req.user = user;
-            console.log('[OK] Platform mode WebSocket authenticated for user:', user.username);
-            return true;
-        }
-
-        // Normal mode: verify token
-        // Extract token from query parameters or headers
-        const url = new URL(info.req.url, 'http://localhost');
-        const token = url.searchParams.get('token') ||
-            info.req.headers.authorization?.split(' ')[1];
-
-        // Verify token
-        const user = authenticateWebSocket(token);
-        if (!user) {
-            console.log('[WARN] WebSocket authentication failed');
-            return false;
-        }
-
-        // Store user info in the request for later use
-        info.req.user = user;
-        console.log('[OK] WebSocket authenticated for user:', user.username);
-        return true;
-    }
+    verifyClient: frappeVerifyClient,
 });
 
 // Make WebSocket server available to routes
 app.locals.wss = wss;
 
-app.use(cors());
+// CORS restricted to Frappe site origin
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://neoservice.neoffice.me';
+app.use(cors({
+  origin: ALLOWED_ORIGIN,
+  credentials: true,
+}));
 app.use(express.json({
   limit: '50mb',
   type: (req) => {
@@ -337,46 +303,31 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Optional API key validation (if configured)
-app.use('/api', validateApiKey);
+// Frappe session auth: validate sid cookie + System Manager role on all API routes
+app.use('/api', frappeAuth);
 
-// Authentication routes (public)
-app.use('/api/auth', authRoutes);
+// Projects API Routes
+app.use('/api/projects', projectsRoutes);
 
-// Projects API Routes (protected)
-app.use('/api/projects', authenticateToken, projectsRoutes);
+// Git API Routes
+app.use('/api/git', gitRoutes);
 
-// Git API Routes (protected)
-app.use('/api/git', authenticateToken, gitRoutes);
-
-// MCP API Routes (protected)
-app.use('/api/mcp', authenticateToken, mcpRoutes);
-
-// Cursor API Routes (protected)
-app.use('/api/cursor', authenticateToken, cursorRoutes);
-
-// TaskMaster API Routes (protected)
-app.use('/api/taskmaster', authenticateToken, taskmasterRoutes);
+// MCP API Routes
+app.use('/api/mcp', mcpRoutes);
 
 // MCP utilities
-app.use('/api/mcp-utils', authenticateToken, mcpUtilsRoutes);
+app.use('/api/mcp-utils', mcpUtilsRoutes);
 
-// Commands API Routes (protected)
-app.use('/api/commands', authenticateToken, commandsRoutes);
+// Commands API Routes
+app.use('/api/commands', commandsRoutes);
 
-// Settings API Routes (protected)
-app.use('/api/settings', authenticateToken, settingsRoutes);
+// Settings API Routes
+app.use('/api/settings', settingsRoutes);
 
-// CLI Authentication API Routes (protected)
-app.use('/api/cli', authenticateToken, cliAuthRoutes);
+// User API Routes
+app.use('/api/user', userRoutes);
 
-// User API Routes (protected)
-app.use('/api/user', authenticateToken, userRoutes);
-
-// Codex API Routes (protected)
-app.use('/api/codex', authenticateToken, codexRoutes);
-
-// Agent API Routes (uses API key authentication)
+// Agent API Routes
 app.use('/api/agent', agentRoutes);
 
 // Serve public files (like api-docs.html)
@@ -403,7 +354,7 @@ app.use(express.static(path.join(__dirname, '../dist'), {
 // Frontend now uses window.location for WebSocket URLs
 
 // System update endpoint
-app.post('/api/system/update', authenticateToken, async (req, res) => {
+app.post('/api/system/update', async (req, res) => {
     try {
         // Get the project root directory (parent of server directory)
         const projectRoot = path.join(__dirname, '..');
@@ -467,7 +418,7 @@ app.post('/api/system/update', authenticateToken, async (req, res) => {
     }
 });
 
-app.get('/api/projects', authenticateToken, async (req, res) => {
+app.get('/api/projects', async (req, res) => {
     try {
         const projects = await getProjects(broadcastProgress);
         res.json(projects);
@@ -476,7 +427,7 @@ app.get('/api/projects', authenticateToken, async (req, res) => {
     }
 });
 
-app.get('/api/projects/:projectName/sessions', authenticateToken, async (req, res) => {
+app.get('/api/projects/:projectName/sessions', async (req, res) => {
     try {
         const { limit = 5, offset = 0 } = req.query;
         const result = await getSessions(req.params.projectName, parseInt(limit), parseInt(offset));
@@ -487,7 +438,7 @@ app.get('/api/projects/:projectName/sessions', authenticateToken, async (req, re
 });
 
 // Get messages for a specific session
-app.get('/api/projects/:projectName/sessions/:sessionId/messages', authenticateToken, async (req, res) => {
+app.get('/api/projects/:projectName/sessions/:sessionId/messages', async (req, res) => {
     try {
         const { projectName, sessionId } = req.params;
         const { limit, offset } = req.query;
@@ -512,7 +463,7 @@ app.get('/api/projects/:projectName/sessions/:sessionId/messages', authenticateT
 });
 
 // Rename project endpoint
-app.put('/api/projects/:projectName/rename', authenticateToken, async (req, res) => {
+app.put('/api/projects/:projectName/rename', async (req, res) => {
     try {
         const { displayName } = req.body;
         await renameProject(req.params.projectName, displayName);
@@ -523,7 +474,7 @@ app.put('/api/projects/:projectName/rename', authenticateToken, async (req, res)
 });
 
 // Delete session endpoint
-app.delete('/api/projects/:projectName/sessions/:sessionId', authenticateToken, async (req, res) => {
+app.delete('/api/projects/:projectName/sessions/:sessionId', async (req, res) => {
     try {
         const { projectName, sessionId } = req.params;
         console.log(`[API] Deleting session: ${sessionId} from project: ${projectName}`);
@@ -537,7 +488,7 @@ app.delete('/api/projects/:projectName/sessions/:sessionId', authenticateToken, 
 });
 
 // Delete project endpoint (force=true to delete with sessions)
-app.delete('/api/projects/:projectName', authenticateToken, async (req, res) => {
+app.delete('/api/projects/:projectName', async (req, res) => {
     try {
         const { projectName } = req.params;
         const force = req.query.force === 'true';
@@ -549,7 +500,7 @@ app.delete('/api/projects/:projectName', authenticateToken, async (req, res) => 
 });
 
 // Create project endpoint
-app.post('/api/projects/create', authenticateToken, async (req, res) => {
+app.post('/api/projects/create', async (req, res) => {
     try {
         const { path: projectPath } = req.body;
 
@@ -577,7 +528,7 @@ const expandWorkspacePath = (inputPath) => {
 };
 
 // Browse filesystem endpoint for project suggestions - uses existing getFileTree
-app.get('/api/browse-filesystem', authenticateToken, async (req, res) => {
+app.get('/api/browse-filesystem', async (req, res) => {
     try {
         const { path: dirPath } = req.query;
         
@@ -657,7 +608,7 @@ app.get('/api/browse-filesystem', authenticateToken, async (req, res) => {
     }
 });
 
-app.post('/api/create-folder', authenticateToken, async (req, res) => {
+app.post('/api/create-folder', async (req, res) => {
     try {
         const { path: folderPath } = req.body;
         if (!folderPath) {
@@ -698,7 +649,7 @@ app.post('/api/create-folder', authenticateToken, async (req, res) => {
 });
 
 // Read file content endpoint
-app.get('/api/projects/:projectName/file', authenticateToken, async (req, res) => {
+app.get('/api/projects/:projectName/file', async (req, res) => {
     try {
         const { projectName } = req.params;
         const { filePath } = req.query;
@@ -738,7 +689,7 @@ app.get('/api/projects/:projectName/file', authenticateToken, async (req, res) =
 });
 
 // Serve binary file content endpoint (for images, etc.)
-app.get('/api/projects/:projectName/files/content', authenticateToken, async (req, res) => {
+app.get('/api/projects/:projectName/files/content', async (req, res) => {
     try {
         const { projectName } = req.params;
         const { path: filePath } = req.query;
@@ -791,7 +742,7 @@ app.get('/api/projects/:projectName/files/content', authenticateToken, async (re
 });
 
 // Save file content endpoint
-app.put('/api/projects/:projectName/file', authenticateToken, async (req, res) => {
+app.put('/api/projects/:projectName/file', async (req, res) => {
     try {
         const { projectName } = req.params;
         const { filePath, content } = req.body;
@@ -840,7 +791,7 @@ app.put('/api/projects/:projectName/file', authenticateToken, async (req, res) =
     }
 });
 
-app.get('/api/projects/:projectName/files', authenticateToken, async (req, res) => {
+app.get('/api/projects/:projectName/files', async (req, res) => {
     try {
 
         // Using fsPromises from import
@@ -932,55 +883,22 @@ function handleChatConnection(ws) {
 
             if (data.type === 'claude-command') {
                 console.log('[DEBUG] User message:', data.command || '[Continue/Resume]');
-                console.log('📁 Project:', data.options?.projectPath || 'Unknown');
-                console.log('🔄 Session:', data.options?.sessionId ? 'Resume' : 'New');
+                console.log('Project:', data.options?.projectPath || 'Unknown');
+                console.log('Session:', data.options?.sessionId ? 'Resume' : 'New');
 
                 // Use Claude Agents SDK
                 await queryClaudeSDK(data.command, data.options, writer);
-            } else if (data.type === 'cursor-command') {
-                console.log('[DEBUG] Cursor message:', data.command || '[Continue/Resume]');
-                console.log('📁 Project:', data.options?.cwd || 'Unknown');
-                console.log('🔄 Session:', data.options?.sessionId ? 'Resume' : 'New');
-                console.log('🤖 Model:', data.options?.model || 'default');
-                await spawnCursor(data.command, data.options, writer);
-            } else if (data.type === 'codex-command') {
-                console.log('[DEBUG] Codex message:', data.command || '[Continue/Resume]');
-                console.log('📁 Project:', data.options?.projectPath || data.options?.cwd || 'Unknown');
-                console.log('🔄 Session:', data.options?.sessionId ? 'Resume' : 'New');
-                console.log('🤖 Model:', data.options?.model || 'default');
-                await queryCodex(data.command, data.options, writer);
-            } else if (data.type === 'cursor-resume') {
-                // Backward compatibility: treat as cursor-command with resume and no prompt
-                console.log('[DEBUG] Cursor resume session (compat):', data.sessionId);
-                await spawnCursor('', {
-                    sessionId: data.sessionId,
-                    resume: true,
-                    cwd: data.options?.cwd
-                }, writer);
             } else if (data.type === 'abort-session') {
                 console.log('[DEBUG] Abort session request:', data.sessionId);
-                const provider = data.provider || 'claude';
-                let success;
-
-                if (provider === 'cursor') {
-                    success = abortCursorSession(data.sessionId);
-                } else if (provider === 'codex') {
-                    success = abortCodexSession(data.sessionId);
-                } else {
-                    // Use Claude Agents SDK
-                    success = await abortClaudeSDKSession(data.sessionId);
-                }
-
+                const success = await abortClaudeSDKSession(data.sessionId);
                 writer.send({
                     type: 'session-aborted',
                     sessionId: data.sessionId,
-                    provider,
+                    provider: 'claude',
                     success
                 });
             } else if (data.type === 'claude-permission-response') {
-                // Relay UI approval decisions back into the SDK control flow.
-                // This does not persist permissions; it only resolves the in-flight request,
-                // introduced so the SDK can resume once the user clicks Allow/Deny.
+                // Relay UI approval decisions back into the SDK control flow
                 if (data.requestId) {
                     resolveToolApproval(data.requestId, {
                         allow: Boolean(data.allow),
@@ -989,42 +907,18 @@ function handleChatConnection(ws) {
                         rememberEntry: data.rememberEntry
                     });
                 }
-            } else if (data.type === 'cursor-abort') {
-                console.log('[DEBUG] Abort Cursor session:', data.sessionId);
-                const success = abortCursorSession(data.sessionId);
-                writer.send({
-                    type: 'session-aborted',
-                    sessionId: data.sessionId,
-                    provider: 'cursor',
-                    success
-                });
             } else if (data.type === 'check-session-status') {
-                // Check if a specific session is currently processing
-                const provider = data.provider || 'claude';
                 const sessionId = data.sessionId;
-                let isActive;
-
-                if (provider === 'cursor') {
-                    isActive = isCursorSessionActive(sessionId);
-                } else if (provider === 'codex') {
-                    isActive = isCodexSessionActive(sessionId);
-                } else {
-                    // Use Claude Agents SDK
-                    isActive = isClaudeSDKSessionActive(sessionId);
-                }
-
+                const isActive = isClaudeSDKSessionActive(sessionId);
                 writer.send({
                     type: 'session-status',
                     sessionId,
-                    provider,
+                    provider: 'claude',
                     isProcessing: isActive
                 });
             } else if (data.type === 'get-active-sessions') {
-                // Get all currently active sessions
                 const activeSessions = {
-                    claude: getActiveClaudeSDKSessions(),
-                    cursor: getActiveCursorSessions(),
-                    codex: getActiveCodexSessions()
+                    claude: getActiveClaudeSDKSessions()
                 };
                 writer.send({
                     type: 'active-sessions',
@@ -1066,7 +960,7 @@ function handleShellConnection(ws) {
                 const hasSession = data.hasSession;
                 const provider = data.provider || 'claude';
                 const initialCommand = data.initialCommand;
-                const isPlainShell = data.isPlainShell || (!!initialCommand && !hasSession) || provider === 'plain-shell';
+                const isPlainShell = data.isPlainShell || (!!initialCommand && !hasSession) || provider === 'plain-shell' || provider === 'cursor';
                 urlDetectionBuffer = '';
                 announcedAuthUrls.clear();
 
@@ -1367,7 +1261,7 @@ function handleShellConnection(ws) {
     });
 }
 // Audio transcription endpoint
-app.post('/api/transcribe', authenticateToken, async (req, res) => {
+app.post('/api/transcribe', async (req, res) => {
     try {
         const multer = (await import('multer')).default;
         const upload = multer({ storage: multer.memoryStorage() });
@@ -1516,7 +1410,7 @@ Agent instructions:`;
 });
 
 // Image upload endpoint
-app.post('/api/projects/:projectName/upload-images', authenticateToken, async (req, res) => {
+app.post('/api/projects/:projectName/upload-images', async (req, res) => {
     try {
         const multer = (await import('multer')).default;
         const path = (await import('path')).default;
@@ -1601,7 +1495,7 @@ app.post('/api/projects/:projectName/upload-images', authenticateToken, async (r
 });
 
 // Get token usage for a specific session
-app.get('/api/projects/:projectName/sessions/:sessionId/token-usage', authenticateToken, async (req, res) => {
+app.get('/api/projects/:projectName/sessions/:sessionId/token-usage', async (req, res) => {
   try {
     const { projectName, sessionId } = req.params;
     const { provider = 'claude' } = req.query;
@@ -1613,89 +1507,7 @@ app.get('/api/projects/:projectName/sessions/:sessionId/token-usage', authentica
       return res.status(400).json({ error: 'Invalid sessionId' });
     }
 
-    // Handle Cursor sessions - they use SQLite and don't have token usage info
-    if (provider === 'cursor') {
-      return res.json({
-        used: 0,
-        total: 0,
-        breakdown: { input: 0, cacheCreation: 0, cacheRead: 0 },
-        unsupported: true,
-        message: 'Token usage tracking not available for Cursor sessions'
-      });
-    }
-
-    // Handle Codex sessions
-    if (provider === 'codex') {
-      const codexSessionsDir = path.join(homeDir, '.codex', 'sessions');
-
-      // Find the session file by searching for the session ID
-      const findSessionFile = async (dir) => {
-        try {
-          const entries = await fsPromises.readdir(dir, { withFileTypes: true });
-          for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-            if (entry.isDirectory()) {
-              const found = await findSessionFile(fullPath);
-              if (found) return found;
-            } else if (entry.name.includes(safeSessionId) && entry.name.endsWith('.jsonl')) {
-              return fullPath;
-            }
-          }
-        } catch (error) {
-          // Skip directories we can't read
-        }
-        return null;
-      };
-
-      const sessionFilePath = await findSessionFile(codexSessionsDir);
-
-      if (!sessionFilePath) {
-        return res.status(404).json({ error: 'Codex session file not found', sessionId: safeSessionId });
-      }
-
-      // Read and parse the Codex JSONL file
-      let fileContent;
-      try {
-        fileContent = await fsPromises.readFile(sessionFilePath, 'utf8');
-      } catch (error) {
-        if (error.code === 'ENOENT') {
-          return res.status(404).json({ error: 'Session file not found', path: sessionFilePath });
-        }
-        throw error;
-      }
-      const lines = fileContent.trim().split('\n');
-      let totalTokens = 0;
-      let contextWindow = 200000; // Default for Codex/OpenAI
-
-      // Find the latest token_count event with info (scan from end)
-      for (let i = lines.length - 1; i >= 0; i--) {
-        try {
-          const entry = JSON.parse(lines[i]);
-
-          // Codex stores token info in event_msg with type: "token_count"
-          if (entry.type === 'event_msg' && entry.payload?.type === 'token_count' && entry.payload?.info) {
-            const tokenInfo = entry.payload.info;
-            if (tokenInfo.total_token_usage) {
-              totalTokens = tokenInfo.total_token_usage.total_tokens || 0;
-            }
-            if (tokenInfo.model_context_window) {
-              contextWindow = tokenInfo.model_context_window;
-            }
-            break; // Stop after finding the latest token count
-          }
-        } catch (parseError) {
-          // Skip lines that can't be parsed
-          continue;
-        }
-      }
-
-      return res.json({
-        used: totalTokens,
-        total: contextWindow
-      });
-    }
-
-    // Handle Claude sessions (default)
+    // Claude sessions only
     // Extract actual project path
     let projectPath;
     try {
@@ -1887,12 +1699,9 @@ async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden =
 
 const PORT = process.env.PORT || 3001;
 
-// Initialize database and start server
+// Start server (no database init needed — Frappe handles auth)
 async function startServer() {
     try {
-        // Initialize authentication database
-        await initializeDatabase();
-
         // Check if running in production mode (dist folder exists)
         const distIndexPath = path.join(__dirname, '../dist/index.html');
         const isProduction = fs.existsSync(distIndexPath);
@@ -1905,7 +1714,8 @@ async function startServer() {
             console.log(`${c.warn('[WARN]')} Note: Requests will be proxied to Vite dev server at ${c.dim('http://localhost:' + (process.env.VITE_PORT || 5173))}`);
         }
 
-        server.listen(PORT, '0.0.0.0', async () => {
+        const BIND_HOST = process.env.BIND_HOST || '127.0.0.1';
+        server.listen(PORT, BIND_HOST, async () => {
             const appInstallPath = path.join(__dirname, '..');
 
             console.log('');
@@ -1913,7 +1723,7 @@ async function startServer() {
             console.log(`  ${c.bright('Claude Code UI Server - Ready')}`);
             console.log(c.dim('═'.repeat(63)));
             console.log('');
-            console.log(`${c.info('[INFO]')} Server URL:  ${c.bright('http://0.0.0.0:' + PORT)}`);
+            console.log(`${c.info('[INFO]')} Server URL:  ${c.bright('http://' + BIND_HOST + ':' + PORT)}`);
             console.log(`${c.info('[INFO]')} Installed at: ${c.dim(appInstallPath)}`);
             console.log(`${c.tip('[TIP]')}  Run "cloudcli status" for full configuration details`);
             console.log('');

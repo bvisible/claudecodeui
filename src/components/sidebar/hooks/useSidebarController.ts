@@ -277,10 +277,8 @@ export function useSidebarController({
     setSessionDeleteConfirmation(null);
 
     try {
-      const response =
-        provider === 'codex'
-          ? await api.deleteCodexSession(sessionId)
-          : await api.deleteSession(projectName, sessionId);
+      // Frappe integration: codex sessions removed, always use standard delete
+      const response = await api.deleteSession(projectName, sessionId);
 
       if (response.ok) {
         onSessionDelete?.(sessionId);

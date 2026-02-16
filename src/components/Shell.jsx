@@ -129,19 +129,10 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
     try {
       let wsUrl;
 
-      if (IS_PLATFORM) {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        wsUrl = `${protocol}//${window.location.host}/shell`;
-      } else {
-        const token = localStorage.getItem('auth-token');
-        if (!token) {
-          console.error('No authentication token found for Shell WebSocket connection');
-          return;
-        }
-
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        wsUrl = `${protocol}//${window.location.host}/shell?token=${encodeURIComponent(token)}`;
-      }
+      // Frappe integration: always platform mode, use base path for proxy
+      const basePath = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      wsUrl = `${protocol}//${window.location.host}${basePath}/shell`;
 
       ws.current = new WebSocket(wsUrl);
 

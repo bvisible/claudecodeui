@@ -194,6 +194,9 @@ function mapCliOptionsToSDK(options = {}) {
   // This loads CLAUDE.md from project, user (~/.config/claude/CLAUDE.md), and local directories
   sdkOptions.settingSources = ['project', 'user', 'local'];
 
+  // Cost controls: limit turns and session duration
+  sdkOptions.maxTurns = parseInt(process.env.MAX_TURNS, 10) || 50;
+
   // Map resume session
   if (sessionId) {
     sdkOptions.resume = sessionId;

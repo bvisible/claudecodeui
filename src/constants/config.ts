@@ -1,5 +1,5 @@
 /**
  * Environment Flag: Is Platform
- * Indicates if the app is running in Platform mode (hosted) or OSS mode (self-hosted)
+ * Frappe integration: always platform mode
  */
-export const IS_PLATFORM = import.meta.env.VITE_IS_PLATFORM === 'true';
+export const IS_PLATFORM = true;

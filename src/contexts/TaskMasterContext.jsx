@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { api } from '../utils/api';
-import { useAuth } from './AuthContext';
 import { useWebSocket } from './WebSocketContext';
 
 const TaskMasterContext = createContext({
@@ -44,8 +43,10 @@ export const TaskMasterProvider = ({ children }) => {
   // Get WebSocket messages from shared context to avoid duplicate connections
   const { latestMessage } = useWebSocket();
   
-  // Authentication context
-  const { user, token, isLoading: authLoading } = useAuth();
+  // Frappe integration: always authenticated (auth handled by Frappe/nginx)
+  const user = { id: 1, username: 'admin' };
+  const token = 'frappe-session';
+  const authLoading = false;
   
   // State
   const [projects, setProjects] = useState([]);

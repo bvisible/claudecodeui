@@ -22,6 +22,7 @@ export default defineConfig(({ command, mode }) => {
         }
       }
     },
+    base: env.VITE_BASE_PATH || '/ccui/',
     build: {
       outDir: 'dist',
       chunkSizeWarningLimit: 1000,
