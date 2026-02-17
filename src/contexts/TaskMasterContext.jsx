@@ -39,15 +39,18 @@ export const useTaskMaster = () => {
   return context;
 };
 
+// Stable user reference (outside component to avoid re-creation on each render)
+const FRAPPE_USER = { id: 1, username: 'admin' };
+
 export const TaskMasterProvider = ({ children }) => {
   // Get WebSocket messages from shared context to avoid duplicate connections
   const { latestMessage } = useWebSocket();
-  
+
   // Frappe integration: always authenticated (auth handled by Frappe/nginx)
-  const user = { id: 1, username: 'admin' };
+  const user = FRAPPE_USER;
   const token = 'frappe-session';
   const authLoading = false;
-  
+
   // State
   const [projects, setProjects] = useState([]);
   const [currentProject, setCurrentProjectState] = useState(null);
@@ -60,9 +63,13 @@ export const TaskMasterProvider = ({ children }) => {
   const [isLoadingMCP, setIsLoadingMCP] = useState(false);
   const [error, setError] = useState(null);
 
-  // Helper to handle API errors
+  // Helper to handle API errors (silent for TaskMaster — not implemented)
   const handleError = (error, context) => {
-    console.error(`TaskMaster ${context} error:`, error);
+    // Only log once, not on every retry
+    if (!error._logged) {
+      console.warn(`TaskMaster ${context}: not available`);
+      error._logged = true;
+    }
     setError({
       message: error.message || `Failed to ${context}`,
       context,
@@ -215,15 +222,14 @@ export const TaskMasterProvider = ({ children }) => {
     }
   }, [currentProject, user, token]);
 
-  // Load initial data on mount or when auth changes
+  // Load initial data on mount (run once)
   useEffect(() => {
     if (!authLoading && user && token) {
       refreshProjects();
-      refreshMCPStatus();
-    } else {
-      console.log('Auth not ready or no user, skipping project load:', { authLoading, user: !!user, token: !!token });
+      // Skip MCP status check on mount — TaskMaster is not implemented
     }
-  }, [refreshProjects, refreshMCPStatus, authLoading, user, token]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Clear errors when authentication changes
   useEffect(() => {
