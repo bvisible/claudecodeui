@@ -596,6 +596,50 @@ async function getProjects(progressCallback = null) {
     }
   }
 
+  // Discover profile directories from PROFILES_DIR env var
+  const profilesDir = process.env.PROFILES_DIR;
+  if (profilesDir) {
+    try {
+      const profileEntries = await fs.readdir(profilesDir, { withFileTypes: true });
+      const profileDirs = profileEntries.filter(e => e.isDirectory());
+
+      for (const entry of profileDirs) {
+        const profilePath = path.join(profilesDir, entry.name);
+        // Skip if a project with this path already exists
+        const alreadyExists = projects.some(p => p.path === profilePath || p.fullPath === profilePath);
+        if (alreadyExists) continue;
+
+        // Check if CLAUDE.md exists in the profile directory
+        let hasClaudeMd = false;
+        try {
+          await fs.access(path.join(profilePath, 'CLAUDE.md'));
+          hasClaudeMd = true;
+        } catch { /* no CLAUDE.md */ }
+
+        const project = {
+          name: `profile-${entry.name}`,
+          path: profilePath,
+          displayName: entry.name.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          fullPath: profilePath,
+          isCustomName: false,
+          isProfile: true,
+          hasClaudeMd,
+          sessions: [],
+          sessionMeta: { hasMore: false, total: 0 },
+          cursorSessions: [],
+          codexSessions: [],
+          taskmaster: { status: 'not-configured', hasTaskmaster: false, hasEssentialFiles: false }
+        };
+
+        projects.push(project);
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        console.warn('[profiles] Error scanning PROFILES_DIR:', error.message);
+      }
+    }
+  }
+
   // Emit completion after all projects (including manual) are processed
   if (progressCallback) {
     progressCallback({

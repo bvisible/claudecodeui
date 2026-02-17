@@ -118,6 +118,7 @@ export async function frappeAuth(req, res, next) {
 
   // Attach user info to request for downstream use
   req.frappeUser = result.user;
+  req.user = { id: result.user, username: result.user };
   next();
 }
 
@@ -131,6 +132,7 @@ export async function frappeVerifyClient(info, cb) {
   const result = await validateFrappeSession(sid);
 
   if (!result.valid) {
+    console.warn('[ws] Rejected connection:', result.error);
     cb(false, 401, result.error || 'Unauthorized');
     return;
   }

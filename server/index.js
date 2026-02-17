@@ -330,6 +330,11 @@ app.use('/api/user', userRoutes);
 // Agent API Routes
 app.use('/api/agent', agentRoutes);
 
+// TaskMaster stub routes (not implemented in this fork)
+app.all('/api/taskmaster/*', (req, res) => {
+  res.json({ status: 'not_available', data: null });
+});
+
 // Serve public files (like api-docs.html)
 app.use(express.static(path.join(__dirname, '../public')));
 
