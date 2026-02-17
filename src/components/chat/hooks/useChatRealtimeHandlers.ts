@@ -236,6 +236,12 @@ export function useChatRealtimeHandlers({
     }
 
     switch (latestMessage.type) {
+      case 'ws-reconnected': {
+        // WebSocket reconnected after server restart — any in-flight session is gone
+        clearLoadingIndicators();
+        break;
+      }
+
       case 'session-created':
         if (latestMessage.sessionId && !currentSessionId) {
           sessionStorage.setItem('pendingSessionId', latestMessage.sessionId);
@@ -886,10 +892,15 @@ export function useChatRealtimeHandlers({
         const statusSessionId = latestMessage.sessionId;
         const isCurrentSession =
           statusSessionId === currentSessionId || (selectedSession && statusSessionId === selectedSession.id);
-        if (isCurrentSession && latestMessage.isProcessing) {
-          setIsLoading(true);
-          setCanAbortSession(true);
-          onSessionProcessing?.(statusSessionId);
+        if (isCurrentSession) {
+          if (latestMessage.isProcessing) {
+            setIsLoading(true);
+            setCanAbortSession(true);
+            onSessionProcessing?.(statusSessionId);
+          } else {
+            // Session is no longer active (e.g. server restarted) — clear loading state
+            clearLoadingIndicators();
+          }
         }
         break;
       }

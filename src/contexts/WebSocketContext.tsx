@@ -54,8 +54,13 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       const websocket = new WebSocket(wsUrl);
 
       websocket.onopen = () => {
+        const wasDisconnected = !wsRef.current;
         setIsConnected(true);
         wsRef.current = websocket;
+        // Notify listeners about reconnection so they can re-check active sessions
+        if (wasDisconnected) {
+          setLatestMessage({ type: 'ws-reconnected', timestamp: Date.now() });
+        }
       };
 
       websocket.onmessage = (event) => {

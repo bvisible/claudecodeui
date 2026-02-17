@@ -703,8 +703,9 @@ async function abortClaudeSDKSession(sessionId) {
   const session = getSession(sessionId);
 
   if (!session) {
-    console.log(`Session ${sessionId} not found`);
-    return false;
+    // Session already gone (e.g. server restart) — treat as successfully stopped
+    console.log(`Session ${sessionId} not found (already stopped)`);
+    return true;
   }
 
   try {
