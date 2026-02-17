@@ -1025,49 +1025,67 @@ async function renameProject(projectName, newDisplayName) {
 // Delete a session from a project
 async function deleteSession(projectName, sessionId) {
   const projectDir = path.join(os.homedir(), '.claude', 'projects', projectName);
-  
+  let deleted = false;
+
   try {
     const files = await fs.readdir(projectDir);
     const jsonlFiles = files.filter(file => file.endsWith('.jsonl'));
-    
+
     if (jsonlFiles.length === 0) {
       throw new Error('No session files found for this project');
     }
-    
-    // Check all JSONL files to find which one contains the session
+
+    // Strategy: delete the main session file + clean up related agent files.
+    // Session files are named {sessionId}.jsonl; agent files are agent-{agentId}.jsonl.
+    // The old approach iterated alphabetically and returned on first match, which
+    // hit agent files before the main session file and left it untouched.
+
     for (const file of jsonlFiles) {
       const jsonlFile = path.join(projectDir, file);
       const content = await fs.readFile(jsonlFile, 'utf8');
       const lines = content.split('\n').filter(line => line.trim());
-      
-      // Check if this file contains the session
+
+      if (lines.length === 0) {
+        // Remove empty files left over from previous deletions
+        await fs.unlink(jsonlFile).catch(() => {});
+        continue;
+      }
+
       const hasSession = lines.some(line => {
         try {
-          const data = JSON.parse(line);
-          return data.sessionId === sessionId;
+          return JSON.parse(line).sessionId === sessionId;
         } catch {
           return false;
         }
       });
-      
-      if (hasSession) {
-        // Filter out all entries for this session
-        const filteredLines = lines.filter(line => {
-          try {
-            const data = JSON.parse(line);
-            return data.sessionId !== sessionId;
-          } catch {
-            return true; // Keep malformed lines
-          }
-        });
-        
-        // Write back the filtered content
-        await fs.writeFile(jsonlFile, filteredLines.join('\n') + (filteredLines.length > 0 ? '\n' : ''));
-        return true;
+
+      if (!hasSession) continue;
+
+      // Filter out all entries for this session
+      const filteredLines = lines.filter(line => {
+        try {
+          return JSON.parse(line).sessionId !== sessionId;
+        } catch {
+          return true;
+        }
+      });
+
+      if (filteredLines.length === 0) {
+        // File is now empty — remove it entirely
+        await fs.unlink(jsonlFile).catch(() => {});
+        console.log(`[deleteSession] Removed empty file: ${file}`);
+      } else {
+        await fs.writeFile(jsonlFile, filteredLines.join('\n') + '\n');
+        console.log(`[deleteSession] Cleaned ${lines.length - filteredLines.length} entries from: ${file}`);
       }
+      deleted = true;
+      // Do NOT return early — continue to clean ALL files referencing this sessionId
     }
-    
-    throw new Error(`Session ${sessionId} not found in any files`);
+
+    if (!deleted) {
+      throw new Error(`Session ${sessionId} not found in any files`);
+    }
+    return true;
   } catch (error) {
     console.error(`Error deleting session ${sessionId} from project ${projectName}:`, error);
     throw error;
