@@ -55,13 +55,13 @@ async function validateFrappeSession(sid) {
       return { valid: false, error: 'Not authenticated' };
     }
 
-    // Step 2: Check System Manager role
+    // Step 2: Check System Manager role via user roles API
     const roleRes = await fetch(
-      `${FRAPPE_URL}/api/method/frappe.client.get_list?` +
-      `doctype=Has Role&filters=[["parent","=","${user}"],["role","=","System Manager"]]&limit_page_length=1`,
+      `${FRAPPE_URL}/api/method/frappe.core.doctype.user.user.get_roles?uid=${encodeURIComponent(user)}`,
       {
         headers: {
           'Cookie': `sid=${sid}`,
+          'Host': FRAPPE_SITE,
           'Accept': 'application/json',
         },
       }
@@ -72,7 +72,8 @@ async function validateFrappeSession(sid) {
     }
 
     const roleData = await roleRes.json();
-    const hasRole = roleData?.message?.length > 0;
+    const roles = roleData?.message || [];
+    const hasRole = roles.includes('System Manager');
 
     if (!hasRole) {
       return { valid: false, error: 'Not a System Manager' };
