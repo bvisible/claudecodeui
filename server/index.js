@@ -330,6 +330,19 @@ app.use('/api/user', userRoutes);
 // Agent API Routes
 app.use('/api/agent', agentRoutes);
 
+// CLI status stub routes — CCUI checks these for provider connection status.
+// In this Frappe fork we use the Anthropic SDK directly (no CLI login needed),
+// so we report Claude as connected and other providers as unavailable.
+app.get('/api/cli/claude/status', (req, res) => {
+  res.json({ authenticated: true, email: 'nora@noraai.ch' });
+});
+app.get('/api/cli/cursor/status', (req, res) => {
+  res.json({ authenticated: false, email: null, error: 'Cursor is not available in this installation' });
+});
+app.get('/api/cli/codex/status', (req, res) => {
+  res.json({ authenticated: false, email: null, error: 'Codex is not available in this installation' });
+});
+
 // TaskMaster stub routes (not implemented in this fork)
 app.all('/api/taskmaster/*', (req, res) => {
   res.json({ status: 'not_available', data: null });
