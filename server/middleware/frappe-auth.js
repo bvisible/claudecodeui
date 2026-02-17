@@ -11,6 +11,7 @@
 import fetch from 'node-fetch';
 
 const FRAPPE_URL = process.env.FRAPPE_URL || 'http://127.0.0.1:8000';
+const FRAPPE_SITE = process.env.FRAPPE_SITE || 'prod.local';
 
 // Cache validated sessions to avoid hitting Frappe on every request
 // Key: sid, Value: { user, validatedAt }
@@ -38,6 +39,7 @@ async function validateFrappeSession(sid) {
     const userRes = await fetch(`${FRAPPE_URL}/api/method/frappe.auth.get_logged_user`, {
       headers: {
         'Cookie': `sid=${sid}`,
+        'Host': FRAPPE_SITE,
         'Accept': 'application/json',
       },
     });
