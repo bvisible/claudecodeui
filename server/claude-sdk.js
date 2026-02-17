@@ -195,7 +195,10 @@ function mapCliOptionsToSDK(options = {}) {
   sdkOptions.settingSources = ['project', 'user', 'local'];
 
   // Cost controls: limit turns and thinking budget
-  sdkOptions.maxTurns = parseInt(process.env.MAX_TURNS, 10) || 50;
+  // maxTurns controls the agent loop iterations. 50 is too high for interactive
+  // chat — the model starts a new thinking round after each text response.
+  // Default to 3: enough for tool-use workflows, prevents runaway loops.
+  sdkOptions.maxTurns = parseInt(process.env.MAX_TURNS, 10) || 3;
 
   // Limit extended thinking tokens to prevent infinite "Thinking..." loops.
   // Opus models use extended thinking by default; without a cap the agent loop
@@ -574,6 +577,13 @@ async function queryClaudeSDK(command, options = {}, ws) {
       options: sdkOptions
     });
 
+    // Apply thinking budget on the query instance (belt-and-suspenders with sdkOptions)
+    if (typeof queryInstance.setMaxThinkingTokens === 'function') {
+      const thinkingBudget = parseInt(process.env.MAX_THINKING_TOKENS, 10) || 10000;
+      queryInstance.setMaxThinkingTokens(thinkingBudget);
+      console.log(`[SDK] setMaxThinkingTokens(${thinkingBudget}) called on query instance`);
+    }
+
     // Restore immediately — Query constructor already captured the value
     if (prevStreamTimeout !== undefined) {
       process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT = prevStreamTimeout;
@@ -588,7 +598,11 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
     // Process streaming messages
     console.log('Starting async generator loop for session:', capturedSessionId || 'NEW');
+    let resultCount = 0;
     for await (const message of queryInstance) {
+      // Log message type for debugging agent loop behavior
+      console.log(`[SDK msg] type=${message.type}${message.subtype ? ' subtype=' + message.subtype : ''}${message.tool ? ' tool=' + message.tool : ''}`);
+
       // Capture session ID from first message
       if (message.session_id && !capturedSessionId) {
 
@@ -607,11 +621,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
             type: 'session-created',
             sessionId: capturedSessionId
           });
-        } else {
-          console.log('Not sending session-created. sessionId:', sessionId, 'sessionCreatedSent:', sessionCreatedSent);
         }
-      } else {
-        console.log('No session_id in message or already captured. message.session_id:', message.session_id, 'capturedSessionId:', capturedSessionId);
       }
 
       // Transform and send message to WebSocket
