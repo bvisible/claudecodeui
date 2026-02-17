@@ -194,8 +194,16 @@ function mapCliOptionsToSDK(options = {}) {
   // This loads CLAUDE.md from project, user (~/.config/claude/CLAUDE.md), and local directories
   sdkOptions.settingSources = ['project', 'user', 'local'];
 
-  // Cost controls: limit turns and session duration
+  // Cost controls: limit turns and thinking budget
   sdkOptions.maxTurns = parseInt(process.env.MAX_TURNS, 10) || 50;
+
+  // Limit extended thinking tokens to prevent infinite "Thinking..." loops.
+  // Opus models use extended thinking by default; without a cap the agent loop
+  // can spin on thinking blocks indefinitely after a text response.
+  const maxThinking = parseInt(process.env.MAX_THINKING_TOKENS, 10) || 10000;
+  if (maxThinking > 0) {
+    sdkOptions.maxThinkingTokens = maxThinking;
+  }
 
   // Map resume session
   if (sessionId) {
@@ -385,58 +393,74 @@ async function cleanupTempFiles(tempImagePaths, tempDir) {
 }
 
 /**
- * Loads MCP server configurations from ~/.claude.json
+ * Loads MCP server configurations from multiple sources:
+ * 1. ~/.claude.json (global + project-specific mcpServers)
+ * 2. ~/.claude/*.json files containing mcpServers objects (e.g. mcp-knowledge.json)
+ * 3. Project-specific configs from ~/.claude.json projects key
  * @param {string} cwd - Current working directory for project-specific configs
  * @returns {Object|null} MCP servers object or null if none found
  */
 async function loadMcpConfig(cwd) {
   try {
-    const claudeConfigPath = path.join(os.homedir(), '.claude.json');
-
-    // Check if config file exists
-    try {
-      await fs.access(claudeConfigPath);
-    } catch (error) {
-      // File doesn't exist, return null
-      console.log('No ~/.claude.json found, proceeding without MCP servers');
-      return null;
-    }
-
-    // Read and parse config file
-    let claudeConfig;
-    try {
-      const configContent = await fs.readFile(claudeConfigPath, 'utf8');
-      claudeConfig = JSON.parse(configContent);
-    } catch (error) {
-      console.error('Failed to parse ~/.claude.json:', error.message);
-      return null;
-    }
-
-    // Extract MCP servers (merge global and project-specific)
     let mcpServers = {};
 
-    // Add global MCP servers
-    if (claudeConfig.mcpServers && typeof claudeConfig.mcpServers === 'object') {
-      mcpServers = { ...claudeConfig.mcpServers };
-      console.log(`Loaded ${Object.keys(mcpServers).length} global MCP servers`);
-    }
+    // Source 1: ~/.claude.json (global + project-specific)
+    const claudeConfigPath = path.join(os.homedir(), '.claude.json');
+    try {
+      const configContent = await fs.readFile(claudeConfigPath, 'utf8');
+      const claudeConfig = JSON.parse(configContent);
 
-    // Add/override with project-specific MCP servers
-    if (claudeConfig.claudeProjects && cwd) {
-      const projectConfig = claudeConfig.claudeProjects[cwd];
-      if (projectConfig && projectConfig.mcpServers && typeof projectConfig.mcpServers === 'object') {
-        mcpServers = { ...mcpServers, ...projectConfig.mcpServers };
-        console.log(`Loaded ${Object.keys(projectConfig.mcpServers).length} project-specific MCP servers`);
+      // Global MCP servers
+      if (claudeConfig.mcpServers && typeof claudeConfig.mcpServers === 'object') {
+        Object.assign(mcpServers, claudeConfig.mcpServers);
+        console.log(`Loaded ${Object.keys(claudeConfig.mcpServers).length} global MCP servers from ~/.claude.json`);
       }
+
+      // Project-specific MCP servers (from "projects" key)
+      if (claudeConfig.projects && cwd) {
+        const projectConfig = claudeConfig.projects[cwd];
+        if (projectConfig?.mcpServers && typeof projectConfig.mcpServers === 'object' && Object.keys(projectConfig.mcpServers).length > 0) {
+          Object.assign(mcpServers, projectConfig.mcpServers);
+          console.log(`Loaded ${Object.keys(projectConfig.mcpServers).length} project MCP servers for ${cwd}`);
+        }
+      }
+    } catch {
+      // ~/.claude.json doesn't exist or can't be parsed — not an error
     }
 
-    // Return null if no servers found
+    // Source 2: ~/.claude/*.json files containing mcpServers
+    const claudeDir = path.join(os.homedir(), '.claude');
+    try {
+      const entries = await fs.readdir(claudeDir);
+      for (const entry of entries) {
+        if (!entry.endsWith('.json') || entry === 'settings.json' || entry === 'stats-cache.json' || entry === '.credentials.json') {
+          continue;
+        }
+        try {
+          const filePath = path.join(claudeDir, entry);
+          const content = await fs.readFile(filePath, 'utf8');
+          const parsed = JSON.parse(content);
+          if (parsed.mcpServers && typeof parsed.mcpServers === 'object') {
+            const serverCount = Object.keys(parsed.mcpServers).length;
+            if (serverCount > 0) {
+              Object.assign(mcpServers, parsed.mcpServers);
+              console.log(`Loaded ${serverCount} MCP servers from ~/.claude/${entry}`);
+            }
+          }
+        } catch {
+          // Skip files that can't be parsed
+        }
+      }
+    } catch {
+      // ~/.claude/ directory doesn't exist — not an error
+    }
+
     if (Object.keys(mcpServers).length === 0) {
       console.log('No MCP servers configured');
       return null;
     }
 
-    console.log(`Total MCP servers loaded: ${Object.keys(mcpServers).length}`);
+    console.log(`Total MCP servers loaded: ${Object.keys(mcpServers).length} (${Object.keys(mcpServers).join(', ')})`);
     return mcpServers;
   } catch (error) {
     console.error('Error loading MCP config:', error.message);
