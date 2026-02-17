@@ -52,6 +52,11 @@ export const getSessionDate = (session: SessionWithProvider): Date => {
 };
 
 export const getSessionName = (session: SessionWithProvider, t: TFunction): string => {
+  // Custom name takes priority (user-renamed session)
+  if (session.customName) {
+    return session.customName;
+  }
+
   if (session.__provider === 'cursor') {
     return session.name || t('projects.untitledSession');
   }

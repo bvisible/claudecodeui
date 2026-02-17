@@ -763,10 +763,19 @@ async function getSessions(projectName, limit = 5, offset = 0) {
       .filter(session => !session.summary.startsWith('{ "'))
       .sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity));
 
+    // Apply custom session names from project config
+    const config = await loadProjectConfig();
+    const sessionNames = config[projectName]?.sessionNames || {};
+    for (const session of visibleSessions) {
+      if (sessionNames[session.id]) {
+        session.customName = sessionNames[session.id];
+      }
+    }
+
     const total = visibleSessions.length;
     const paginatedSessions = visibleSessions.slice(offset, offset + limit);
     const hasMore = offset + limit < total;
-    
+
     return {
       sessions: paginatedSessions,
       hasMore,
@@ -1018,6 +1027,27 @@ async function renameProject(projectName, newDisplayName) {
     };
   }
   
+  await saveProjectConfig(config);
+  return true;
+}
+
+// Rename a session's display name (stored in project-config.json)
+async function renameSession(projectName, sessionId, newName) {
+  const config = await loadProjectConfig();
+
+  if (!config[projectName]) {
+    config[projectName] = {};
+  }
+  if (!config[projectName].sessionNames) {
+    config[projectName].sessionNames = {};
+  }
+
+  if (!newName || newName.trim() === '') {
+    delete config[projectName].sessionNames[sessionId];
+  } else {
+    config[projectName].sessionNames[sessionId] = newName.trim();
+  }
+
   await saveProjectConfig(config);
   return true;
 }
@@ -1786,6 +1816,7 @@ export {
   getSessionMessages,
   parseJsonlSessions,
   renameProject,
+  renameSession,
   deleteSession,
   isProjectEmpty,
   deleteProject,
