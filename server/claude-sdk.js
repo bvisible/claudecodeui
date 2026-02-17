@@ -194,17 +194,16 @@ function mapCliOptionsToSDK(options = {}) {
   // This loads CLAUDE.md from project, user (~/.config/claude/CLAUDE.md), and local directories
   sdkOptions.settingSources = ['project', 'user', 'local'];
 
-  // Cost controls: limit turns and thinking budget
-  // maxTurns controls the agent loop iterations. 50 is too high for interactive
-  // chat — the model starts a new thinking round after each text response.
-  // Default to 3: enough for tool-use workflows, prevents runaway loops.
-  sdkOptions.maxTurns = parseInt(process.env.MAX_TURNS, 10) || 3;
+  // Agent loop: maxTurns controls how many API round-trips the agent can do.
+  // Each turn = one API call. Tool use needs at least 2 turns (call + result).
+  // We break out of the generator on `type=result` anyway, but this is a safety net.
+  sdkOptions.maxTurns = parseInt(process.env.MAX_TURNS, 10) || 10;
 
-  // Limit extended thinking tokens to prevent infinite "Thinking..." loops.
-  // Opus models use extended thinking by default; without a cap the agent loop
-  // can spin on thinking blocks indefinitely after a text response.
-  const maxThinking = parseInt(process.env.MAX_THINKING_TOKENS, 10) || 10000;
-  if (maxThinking > 0) {
+  // Extended thinking budget. Higher = better quality responses (more reasoning).
+  // On subscription plans there's no per-token cost, so default high for best results.
+  // Set MAX_THINKING_TOKENS=0 to let the SDK use its own default.
+  const maxThinking = parseInt(process.env.MAX_THINKING_TOKENS, 10);
+  if (!isNaN(maxThinking) && maxThinking > 0) {
     sdkOptions.maxThinkingTokens = maxThinking;
   }
 
@@ -577,11 +576,11 @@ async function queryClaudeSDK(command, options = {}, ws) {
       options: sdkOptions
     });
 
-    // Apply thinking budget on the query instance (belt-and-suspenders with sdkOptions)
-    if (typeof queryInstance.setMaxThinkingTokens === 'function') {
-      const thinkingBudget = parseInt(process.env.MAX_THINKING_TOKENS, 10) || 10000;
-      queryInstance.setMaxThinkingTokens(thinkingBudget);
-      console.log(`[SDK] setMaxThinkingTokens(${thinkingBudget}) called on query instance`);
+    // Apply thinking budget on the query instance if explicitly configured
+    const envThinking = parseInt(process.env.MAX_THINKING_TOKENS, 10);
+    if (!isNaN(envThinking) && envThinking > 0 && typeof queryInstance.setMaxThinkingTokens === 'function') {
+      queryInstance.setMaxThinkingTokens(envThinking);
+      console.log(`[SDK] setMaxThinkingTokens(${envThinking}) called on query instance`);
     }
 
     // Restore immediately — Query constructor already captured the value
@@ -598,7 +597,6 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
     // Process streaming messages
     console.log('Starting async generator loop for session:', capturedSessionId || 'NEW');
-    let resultCount = 0;
     for await (const message of queryInstance) {
       // Log message type for debugging agent loop behavior
       console.log(`[SDK msg] type=${message.type}${message.subtype ? ' subtype=' + message.subtype : ''}${message.tool ? ' tool=' + message.tool : ''}`);
@@ -643,6 +641,13 @@ async function queryClaudeSDK(command, options = {}, ws) {
             sessionId: capturedSessionId || sessionId || null
           });
         }
+
+        // Break the loop after the result message. The SDK async generator
+        // may not close itself even after maxTurns is reached, which would
+        // leave the for-await hanging indefinitely and prevent claude-complete
+        // from ever being sent to the frontend.
+        console.log('[SDK] Result received, breaking out of generator loop');
+        break;
       }
     }
 
