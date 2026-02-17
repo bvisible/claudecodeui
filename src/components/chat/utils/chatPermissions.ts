@@ -36,6 +36,10 @@ export function getClaudePermissionSuggestion(
   if (provider !== 'claude') return null;
   if (!message?.toolResult?.isError) return null;
 
+  // In bypass mode all tools are already permitted — no suggestion needed
+  const permissionMode = safeLocalStorage.getItem('permissionMode-global');
+  if (permissionMode === 'bypassPermissions') return null;
+
   const toolName = message?.toolName;
   const entry = buildClaudeToolPermissionEntry(toolName, message.toolInput);
   if (!entry) return null;
