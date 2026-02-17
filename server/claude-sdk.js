@@ -141,6 +141,7 @@ function mapCliOptionsToSDK(options = {}) {
   }
 
   // Map permission mode
+  console.log(`[SDK] Permission mode from frontend: '${permissionMode}'`);
   if (permissionMode && permissionMode !== 'default') {
     sdkOptions.permissionMode = permissionMode;
   }
@@ -501,10 +502,12 @@ async function queryClaudeSDK(command, options = {}, ws) {
     tempDir = imageResult.tempDir;
 
     sdkOptions.canUseTool = async (toolName, input, context) => {
+      console.log(`[canUseTool] tool=${toolName} permissionMode=${sdkOptions.permissionMode}`);
       const requiresInteraction = TOOLS_REQUIRING_INTERACTION.has(toolName);
 
       if (!requiresInteraction) {
         if (sdkOptions.permissionMode === 'bypassPermissions') {
+          console.log(`[canUseTool] Auto-allowing ${toolName} (bypassPermissions)`);
           return { behavior: 'allow', updatedInput: input };
         }
 

@@ -9,7 +9,9 @@ interface UseChatProviderStateArgs {
 }
 
 export function useChatProviderState({ selectedSession }: UseChatProviderStateArgs) {
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => {
+    return (localStorage.getItem('permissionMode-global') as PermissionMode) || 'default';
+  });
   const [pendingPermissionRequests, setPendingPermissionRequests] = useState<PendingPermissionRequest[]>([]);
   const [provider, setProvider] = useState<SessionProvider>(() => {
     return (localStorage.getItem('selected-provider') as SessionProvider) || 'claude';
@@ -31,8 +33,16 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
       return;
     }
 
-    const savedMode = localStorage.getItem(`permissionMode-${selectedSession.id}`);
-    setPermissionMode((savedMode as PermissionMode) || 'default');
+    // Check session-specific mode first, then fall back to global preference.
+    // If neither exists, keep the current in-memory mode (don't reset to default).
+    const savedMode =
+      localStorage.getItem(`permissionMode-${selectedSession.id}`) ||
+      localStorage.getItem('permissionMode-global');
+    if (savedMode) {
+      setPermissionMode(savedMode as PermissionMode);
+      // Persist the mode for this session so future loads find it directly
+      localStorage.setItem(`permissionMode-${selectedSession.id}`, savedMode);
+    }
   }, [selectedSession?.id]);
 
   useEffect(() => {
@@ -91,6 +101,8 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     const nextMode = modes[nextIndex];
     setPermissionMode(nextMode);
 
+    // Always save globally so mode persists across new session creation
+    localStorage.setItem('permissionMode-global', nextMode);
     if (selectedSession?.id) {
       localStorage.setItem(`permissionMode-${selectedSession.id}`, nextMode);
     }
