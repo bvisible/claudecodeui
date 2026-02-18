@@ -596,9 +596,10 @@ async function queryClaudeSDK(command, options = {}, ws) {
       return { behavior: 'deny', message: decision.message ?? 'User denied tool use' };
     };
 
-    // Set stream-close timeout for interactive tools (Query constructor reads it synchronously). Claude Agent SDK has a default of 5s and this overrides it
+    // Set stream-close timeout high enough for interactive tools (ExitPlanMode, AskUserQuestion).
+    // SDK default is 5s — we need much more since users may take minutes to review plans.
     const prevStreamTimeout = process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT;
-    process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT = '300000';
+    process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT = '3600000';
 
     const queryInstance = query({
       prompt: finalCommand,
