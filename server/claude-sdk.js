@@ -24,7 +24,7 @@ const pendingToolApprovals = new Map();
 
 const TOOL_APPROVAL_TIMEOUT_MS = parseInt(process.env.CLAUDE_TOOL_APPROVAL_TIMEOUT_MS, 10) || 55000;
 
-const TOOLS_REQUIRING_INTERACTION = new Set(['AskUserQuestion']);
+const TOOLS_REQUIRING_INTERACTION = new Set(['AskUserQuestion', 'ExitPlanMode']);
 
 function createRequestId() {
   if (typeof crypto.randomUUID === 'function') {
@@ -513,9 +513,10 @@ async function queryClaudeSDK(command, options = {}, ws) {
     sdkOptions.canUseTool = async (toolName, input, context) => {
       console.log(`[canUseTool] tool=${toolName} permissionMode=${sdkOptions.permissionMode}`);
 
-      // Bypass, skipPermissions, or plan mode: auto-allow everything except AskUserQuestion
+      // Bypass, skipPermissions, or plan mode: auto-allow everything except interactive tools
       // Plan mode = exploration phase, SDK already restricts to read-only — no need for permission prompts
-      if (toolName !== 'AskUserQuestion' && (sdkOptions.permissionMode === 'bypassPermissions' || sdkOptions.permissionMode === 'plan' || sdkOptions.skipPermissions)) {
+      // AskUserQuestion and ExitPlanMode require user interaction (answers / plan approval)
+      if (!TOOLS_REQUIRING_INTERACTION.has(toolName) && (sdkOptions.permissionMode === 'bypassPermissions' || sdkOptions.permissionMode === 'plan' || sdkOptions.skipPermissions)) {
         console.log(`[canUseTool] Auto-allowing ${toolName} (bypass/plan/skipPermissions)`);
         return { behavior: 'allow', updatedInput: input };
       }
