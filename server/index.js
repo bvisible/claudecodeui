@@ -935,7 +935,8 @@ function handleChatConnection(ws) {
                         allow: Boolean(data.allow),
                         updatedInput: data.updatedInput,
                         message: data.message,
-                        rememberEntry: data.rememberEntry
+                        rememberEntry: data.rememberEntry,
+                        permissionMode: data.permissionMode
                     });
                 }
             } else if (data.type === 'check-session-status') {

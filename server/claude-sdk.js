@@ -578,6 +578,18 @@ async function queryClaudeSDK(command, options = {}, ws) {
             sdkOptions.disallowedTools = sdkOptions.disallowedTools.filter(entry => entry !== decision.rememberEntry);
           }
         }
+
+        // After ExitPlanMode approval, switch permission mode if user requested it
+        if (toolName === 'ExitPlanMode' && decision.permissionMode) {
+          const sid = capturedSessionId || sessionId;
+          const session = sid ? activeSessions.get(sid) : null;
+          if (session?.queryInstance?.setPermissionMode) {
+            session.queryInstance.setPermissionMode(decision.permissionMode);
+            sdkOptions.permissionMode = decision.permissionMode;
+            console.log(`[canUseTool] ExitPlanMode approved — switched to permissionMode=${decision.permissionMode}`);
+          }
+        }
+
         return { behavior: 'allow', updatedInput: decision.updatedInput ?? input };
       }
 
