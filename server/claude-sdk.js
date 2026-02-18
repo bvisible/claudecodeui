@@ -196,6 +196,10 @@ function mapCliOptionsToSDK(options = {}) {
   // This loads CLAUDE.md from project, user (~/.config/claude/CLAUDE.md), and local directories
   sdkOptions.settingSources = ['project', 'user', 'local'];
 
+  // Enable partial streaming — sends raw API events (content_block_delta etc.)
+  // for real-time text display instead of waiting for the full message.
+  sdkOptions.includePartialMessages = true;
+
   // Agent loop: maxTurns controls how many API round-trips the agent can do.
   // Each turn = one API call. Tool use needs at least 2 turns (call + result).
   // We break out of the generator on `type=result` anyway, but this is a safety net.
@@ -265,16 +269,6 @@ function getSession(sessionId) {
  */
 function getAllSessions() {
   return Array.from(activeSessions.keys());
-}
-
-/**
- * Transforms SDK messages to WebSocket format expected by frontend
- * @param {Object} sdkMessage - SDK message object
- * @returns {Object} Transformed message ready for WebSocket
- */
-function transformMessage(sdkMessage) {
-  // Pass-through; SDK messages match frontend format.
-  return sdkMessage;
 }
 
 /**
@@ -652,11 +646,39 @@ async function queryClaudeSDK(command, options = {}, ws) {
         }
       }
 
-      // Transform and send message to WebSocket
-      const transformedMessage = transformMessage(message);
+      // Handle stream events — unwrap SDK wrapper so frontend gets raw API events
+      // (content_block_delta, content_block_stop, etc.) for real-time text display
+      if (message.type === 'stream_event') {
+        ws.send({
+          type: 'claude-response',
+          data: message.event,
+          sessionId: capturedSessionId || sessionId || null
+        });
+        continue;
+      }
+
+      // For complete assistant messages: filter out text blocks since they were
+      // already streamed via content_block_delta events above. Keep tool_use
+      // and thinking blocks which the frontend handles from complete messages.
+      if (message.type === 'assistant' && message.message?.content) {
+        const nonTextContent = message.message.content.filter(b => b.type !== 'text');
+        if (nonTextContent.length === 0) {
+          // Only text blocks — already streamed, skip this message
+          continue;
+        }
+        // Forward with only non-text blocks (tool_use, thinking)
+        ws.send({
+          type: 'claude-response',
+          data: { ...message, message: { ...message.message, content: nonTextContent } },
+          sessionId: capturedSessionId || sessionId || null
+        });
+        continue;
+      }
+
+      // All other messages (system, user, result) — forward as-is
       ws.send({
         type: 'claude-response',
-        data: transformedMessage,
+        data: message,
         sessionId: capturedSessionId || sessionId || null
       });
 
