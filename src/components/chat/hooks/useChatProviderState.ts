@@ -94,7 +94,7 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     const modes: PermissionMode[] =
       provider === 'codex'
         ? ['default', 'acceptEdits', 'bypassPermissions']
-        : ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
+        : ['default', 'acceptEdits', 'bypassPermissions'];
 
     const currentIndex = modes.indexOf(permissionMode);
     const nextIndex = (currentIndex + 1) % modes.length;

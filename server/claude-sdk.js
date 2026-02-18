@@ -154,7 +154,7 @@ function mapCliOptionsToSDK(options = {}) {
   };
 
   // Handle tool permissions
-  if (settings.skipPermissions && permissionMode !== 'plan') {
+  if (settings.skipPermissions) {
     // When skipping permissions, use bypassPermissions mode
     sdkOptions.permissionMode = 'bypassPermissions';
   }
@@ -503,13 +503,16 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
     sdkOptions.canUseTool = async (toolName, input, context) => {
       console.log(`[canUseTool] tool=${toolName} permissionMode=${sdkOptions.permissionMode}`);
+
+      // Bypass mode: auto-allow everything except AskUserQuestion (needs user input)
+      if (sdkOptions.permissionMode === 'bypassPermissions' && toolName !== 'AskUserQuestion') {
+        console.log(`[canUseTool] Auto-allowing ${toolName} (bypassPermissions)`);
+        return { behavior: 'allow', updatedInput: input };
+      }
+
       const requiresInteraction = TOOLS_REQUIRING_INTERACTION.has(toolName);
 
       if (!requiresInteraction) {
-        if (sdkOptions.permissionMode === 'bypassPermissions') {
-          console.log(`[canUseTool] Auto-allowing ${toolName} (bypassPermissions)`);
-          return { behavior: 'allow', updatedInput: input };
-        }
 
         const isDisallowed = (sdkOptions.disallowedTools || []).some(entry =>
           matchesToolPermission(entry, toolName, input)
