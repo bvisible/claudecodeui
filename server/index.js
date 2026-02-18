@@ -52,7 +52,7 @@ import settingsRoutes from './routes/settings.js';
 import agentRoutes from './routes/agent.js';
 import projectsRoutes, { WORKSPACES_ROOT, validateWorkspacePath } from './routes/projects.js';
 import userRoutes from './routes/user.js';
-import { frappeAuth, frappeVerifyClient } from './middleware/frappe-auth.js';
+import { frappeAuth, frappePageAuth, frappeVerifyClient } from './middleware/frappe-auth.js';
 
 // Frappe integration: auth is handled by Frappe session via middleware
 const IS_PLATFORM = true;
@@ -350,6 +350,9 @@ app.all('/api/taskmaster/*', (req, res) => {
 
 // Serve public files (like api-docs.html)
 app.use(express.static(path.join(__dirname, '../public')));
+
+// Frappe session auth: protect all CCUI pages (redirect to login if not authenticated)
+app.use(frappePageAuth);
 
 // Static files served after API routes
 // Add cache control: HTML files should not be cached, but assets can be cached

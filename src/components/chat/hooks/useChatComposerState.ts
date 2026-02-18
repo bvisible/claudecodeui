@@ -37,6 +37,7 @@ interface UseChatComposerStateArgs {
   currentSessionId: string | null;
   provider: SessionProvider;
   permissionMode: PermissionMode | string;
+  setPermissionMode: (mode: PermissionMode) => void;
   cyclePermissionMode: () => void;
   cursorModel: string;
   claudeModel: string;
@@ -88,6 +89,7 @@ export function useChatComposerState({
   currentSessionId,
   provider,
   permissionMode,
+  setPermissionMode,
   cyclePermissionMode,
   cursorModel,
   claudeModel,
@@ -875,6 +877,7 @@ export function useChatComposerState({
       requestIds: string | string[],
       decision: { allow?: boolean; message?: string; rememberEntry?: string | null; updatedInput?: unknown; permissionMode?: string },
     ) => {
+      console.log('[handlePermissionDecision] called:', { requestIds, decision });
       const ids = Array.isArray(requestIds) ? requestIds : [requestIds];
       const validIds = ids.filter(Boolean);
       if (validIds.length === 0) {
@@ -893,6 +896,18 @@ export function useChatComposerState({
         });
       });
 
+      // When ExitPlanMode is approved with a new permissionMode, update the frontend state
+      // so the next user message uses the correct mode instead of staying in 'plan'.
+      if (decision?.allow && decision?.permissionMode) {
+        const newMode = decision.permissionMode as PermissionMode;
+        console.log('[handlePermissionDecision] Switching permissionMode:', { from: permissionMode, to: newMode, sessionId: selectedSession?.id });
+        setPermissionMode(newMode);
+        localStorage.setItem('permissionMode-global', newMode);
+        if (selectedSession?.id) {
+          localStorage.setItem(`permissionMode-${selectedSession.id}`, newMode);
+        }
+      }
+
       setPendingPermissionRequests((previous) => {
         const next = previous.filter((request) => !validIds.includes(request.requestId));
         if (next.length === 0) {
@@ -901,7 +916,7 @@ export function useChatComposerState({
         return next;
       });
     },
-    [sendMessage, setClaudeStatus, setPendingPermissionRequests],
+    [sendMessage, setClaudeStatus, setPendingPermissionRequests, setPermissionMode, selectedSession?.id],
   );
 
   const handleInputFocusChange = useCallback(

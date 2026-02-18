@@ -143,6 +143,32 @@ export async function frappeVerifyClient(info, cb) {
 }
 
 /**
+ * Express middleware: validates Frappe session for page/static routes.
+ * Redirects to Frappe login instead of returning JSON 401.
+ * Allows hashed assets (JS/CSS) through without auth to avoid redirect loops.
+ */
+export async function frappePageAuth(req, res, next) {
+  // Allow hashed static assets through — they are useless without the HTML shell,
+  // and blocking them would cause redirect loops in the browser.
+  if (req.path.match(/\.(js|css|woff2?|ttf|eot|map)$/) && req.path.includes('-')) {
+    return next();
+  }
+
+  const sid = extractSid(req);
+  const result = await validateFrappeSession(sid);
+
+  if (!result.valid) {
+    // Redirect to Frappe login with return URL
+    const frappeOrigin = process.env.ALLOWED_ORIGIN || 'https://neoservice.neoffice.me';
+    return res.redirect(`${frappeOrigin}/login?redirect-to=/ccui/`);
+  }
+
+  req.frappeUser = result.user;
+  req.user = { id: result.user, username: result.user };
+  next();
+}
+
+/**
  * Clear the session cache (useful for testing or forced re-auth)
  */
 export function clearSessionCache() {
