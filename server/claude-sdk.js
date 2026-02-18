@@ -225,8 +225,10 @@ function mapCliOptionsToSDK(options = {}) {
  * @param {string} tempDir - Temp directory for cleanup
  */
 function addSession(sessionId, queryInstance, tempImagePaths = [], tempDir = null) {
+  const abortController = new AbortController();
   activeSessions.set(sessionId, {
     instance: queryInstance,
+    abortController,
     startTime: Date.now(),
     status: 'active',
     tempImagePaths,
@@ -605,7 +607,16 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
     // Process streaming messages
     console.log('Starting async generator loop for session:', capturedSessionId || 'NEW');
+    let aborted = false;
     for await (const message of queryInstance) {
+      // Check if session was aborted
+      const currentSession = capturedSessionId ? getSession(capturedSessionId) : null;
+      if (currentSession?.abortController?.signal?.aborted) {
+        console.log(`[SDK] Session ${capturedSessionId} aborted, breaking generator loop`);
+        aborted = true;
+        break;
+      }
+
       // Log message type for debugging agent loop behavior
       console.log(`[SDK msg] type=${message.type}${message.subtype ? ' subtype=' + message.subtype : ''}${message.tool ? ' tool=' + message.tool : ''}`);
 
@@ -668,11 +679,12 @@ async function queryClaudeSDK(command, options = {}, ws) {
     await cleanupTempFiles(tempImagePaths, tempDir);
 
     // Send completion event
-    console.log('Streaming complete, sending claude-complete event');
+    const exitCode = aborted ? 1 : 0;
+    console.log(`Streaming ${aborted ? 'aborted' : 'complete'}, sending claude-complete event`);
     ws.send({
       type: 'claude-complete',
       sessionId: capturedSessionId,
-      exitCode: 0,
+      exitCode,
       isNewSession: !sessionId && !!command
     });
     console.log('claude-complete event sent');
@@ -713,24 +725,27 @@ async function abortClaudeSDKSession(sessionId) {
     return true;
   }
 
+  // Already aborting — don't re-trigger
+  if (session.status === 'aborted') {
+    console.log(`Session ${sessionId} already aborting`);
+    return true;
+  }
+
   try {
     console.log(`Aborting SDK session: ${sessionId}`);
+
+    // Signal abort to the generator loop
+    session.status = 'aborted';
+    session.abortController.abort();
 
     // Call interrupt() on the query instance
     await session.instance.interrupt();
 
-    // Update session status
-    session.status = 'aborted';
-
-    // Clean up temporary image files
-    await cleanupTempFiles(session.tempImagePaths, session.tempDir);
-
-    // Clean up session
-    removeSession(sessionId);
-
     return true;
   } catch (error) {
     console.error(`Error aborting session ${sessionId}:`, error);
+    // Still try to force-clean even on error
+    removeSession(sessionId);
     return false;
   }
 }
