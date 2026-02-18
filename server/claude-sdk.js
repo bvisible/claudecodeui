@@ -513,10 +513,10 @@ async function queryClaudeSDK(command, options = {}, ws) {
     sdkOptions.canUseTool = async (toolName, input, context) => {
       console.log(`[canUseTool] tool=${toolName} permissionMode=${sdkOptions.permissionMode}`);
 
-      // Bypass or skipPermissions: auto-allow everything except AskUserQuestion
-      // In plan mode with skipPermissions, keep plan workflow but don't block tools
-      if (toolName !== 'AskUserQuestion' && (sdkOptions.permissionMode === 'bypassPermissions' || sdkOptions.skipPermissions)) {
-        console.log(`[canUseTool] Auto-allowing ${toolName} (bypass/skipPermissions)`);
+      // Bypass, skipPermissions, or plan mode: auto-allow everything except AskUserQuestion
+      // Plan mode = exploration phase, SDK already restricts to read-only — no need for permission prompts
+      if (toolName !== 'AskUserQuestion' && (sdkOptions.permissionMode === 'bypassPermissions' || sdkOptions.permissionMode === 'plan' || sdkOptions.skipPermissions)) {
+        console.log(`[canUseTool] Auto-allowing ${toolName} (bypass/plan/skipPermissions)`);
         return { behavior: 'allow', updatedInput: input };
       }
 
