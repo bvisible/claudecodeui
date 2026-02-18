@@ -157,6 +157,8 @@ function mapCliOptionsToSDK(options = {}) {
   if (settings.skipPermissions && permissionMode !== 'plan') {
     sdkOptions.permissionMode = 'bypassPermissions';
   }
+  // Carry skipPermissions flag so canUseTool can auto-allow in plan mode too
+  sdkOptions.skipPermissions = Boolean(settings.skipPermissions);
 
   let allowedTools = [...(settings.allowedTools || [])];
 
@@ -505,7 +507,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
       // Bypass or skipPermissions: auto-allow everything except AskUserQuestion
       // In plan mode with skipPermissions, keep plan workflow but don't block tools
-      if (toolName !== 'AskUserQuestion' && (sdkOptions.permissionMode === 'bypassPermissions' || settings.skipPermissions)) {
+      if (toolName !== 'AskUserQuestion' && (sdkOptions.permissionMode === 'bypassPermissions' || sdkOptions.skipPermissions)) {
         console.log(`[canUseTool] Auto-allowing ${toolName} (bypass/skipPermissions)`);
         return { behavior: 'allow', updatedInput: input };
       }
