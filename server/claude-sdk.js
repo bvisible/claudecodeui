@@ -199,7 +199,14 @@ function mapCliOptionsToSDK(options = {}) {
   // Agent loop: maxTurns controls how many API round-trips the agent can do.
   // Each turn = one API call. Tool use needs at least 2 turns (call + result).
   // We break out of the generator on `type=result` anyway, but this is a safety net.
-  sdkOptions.maxTurns = parseInt(process.env.MAX_TURNS, 10) || 10;
+  // Default 200 — the result break and budget cap are the real guards.
+  sdkOptions.maxTurns = parseInt(process.env.MAX_TURNS, 10) || 200;
+
+  // Budget cap per session (USD). Prevents runaway costs from looping agents.
+  const maxBudget = parseFloat(process.env.MAX_BUDGET_USD);
+  if (!isNaN(maxBudget) && maxBudget > 0) {
+    sdkOptions.maxBudgetUsd = maxBudget;
+  }
 
   // Extended thinking budget. Higher = better quality responses (more reasoning).
   // On subscription plans there's no per-token cost, so default high for best results.
@@ -224,8 +231,7 @@ function mapCliOptionsToSDK(options = {}) {
  * @param {Array<string>} tempImagePaths - Temp image file paths for cleanup
  * @param {string} tempDir - Temp directory for cleanup
  */
-function addSession(sessionId, queryInstance, tempImagePaths = [], tempDir = null) {
-  const abortController = new AbortController();
+function addSession(sessionId, queryInstance, abortController, tempImagePaths = [], tempDir = null) {
   activeSessions.set(sessionId, {
     instance: queryInstance,
     abortController,
@@ -488,9 +494,15 @@ async function queryClaudeSDK(command, options = {}, ws) {
   let tempImagePaths = [];
   let tempDir = null;
 
+  // Create AbortController for this session — passed to SDK for native cancellation
+  const sessionAbortController = new AbortController();
+
   try {
     // Map CLI options to SDK format
     const sdkOptions = mapCliOptionsToSDK(options);
+
+    // Pass abort controller to SDK for native request cancellation
+    sdkOptions.abortController = sessionAbortController;
 
     // Load MCP configuration
     const mcpServers = await loadMcpConfig(options.cwd);
@@ -602,16 +614,15 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
     // Track the query instance for abort capability
     if (capturedSessionId) {
-      addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir);
+      addSession(capturedSessionId, queryInstance, sessionAbortController, tempImagePaths, tempDir);
     }
 
     // Process streaming messages
     console.log('Starting async generator loop for session:', capturedSessionId || 'NEW');
     let aborted = false;
     for await (const message of queryInstance) {
-      // Check if session was aborted
-      const currentSession = capturedSessionId ? getSession(capturedSessionId) : null;
-      if (currentSession?.abortController?.signal?.aborted) {
+      // Check if session was aborted (via AbortController signal)
+      if (sessionAbortController.signal.aborted) {
         console.log(`[SDK] Session ${capturedSessionId} aborted, breaking generator loop`);
         aborted = true;
         break;
@@ -624,7 +635,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
       if (message.session_id && !capturedSessionId) {
 
         capturedSessionId = message.session_id;
-        addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir);
+        addSession(capturedSessionId, queryInstance, sessionAbortController, tempImagePaths, tempDir);
 
         // Set session ID on writer
         if (ws.setSessionId && typeof ws.setSessionId === 'function') {
@@ -657,6 +668,17 @@ async function queryClaudeSDK(command, options = {}, ws) {
           ws.send({
             type: 'token-budget',
             data: tokenBudget,
+            sessionId: capturedSessionId || sessionId || null
+          });
+        }
+
+        // Send cost tracking data if available
+        if (message.subtype === 'success' && message.total_cost_usd !== undefined) {
+          console.log(`Session cost: $${message.total_cost_usd.toFixed(4)}, duration: ${message.duration_ms}ms`);
+          ws.send({
+            type: 'cost-update',
+            cost: message.total_cost_usd,
+            duration: message.duration_ms,
             sessionId: capturedSessionId || sessionId || null
           });
         }
