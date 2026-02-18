@@ -605,9 +605,6 @@ async function getProjects(progressCallback = null) {
 
       for (const entry of profileDirs) {
         const profilePath = path.join(profilesDir, entry.name);
-        // Skip if a project with this path already exists
-        const alreadyExists = projects.some(p => p.path === profilePath || p.fullPath === profilePath);
-        if (alreadyExists) continue;
 
         // Check if CLAUDE.md exists in the profile directory
         let hasClaudeMd = false;
@@ -616,14 +613,49 @@ async function getProjects(progressCallback = null) {
           hasClaudeMd = true;
         } catch { /* no CLAUDE.md */ }
 
+        // Read profile.json metadata if present
+        let profileMeta = null;
+        try {
+          const metaContent = await fs.readFile(path.join(profilePath, 'profile.json'), 'utf8');
+          profileMeta = JSON.parse(metaContent);
+        } catch { /* no profile.json */ }
+
+        // Count available skills
+        let skillsCount = 0;
+        try {
+          const skillEntries = await fs.readdir(path.join(profilePath, '.claude', 'skills'), { withFileTypes: true });
+          skillsCount = skillEntries.filter(e => e.isDirectory()).length;
+        } catch { /* no skills dir */ }
+
+        // If this path was already discovered as a regular project (e.g. has sessions),
+        // upgrade it to a profile by merging profile metadata
+        const existingIdx = projects.findIndex(p => p.path === profilePath || p.fullPath === profilePath);
+        if (existingIdx !== -1) {
+          const existing = projects[existingIdx];
+          existing.isProfile = true;
+          existing.hasClaudeMd = hasClaudeMd;
+          existing.displayName = profileMeta?.name || existing.displayName;
+          existing.profileMeta = {
+            description: profileMeta?.description || '',
+            icon: profileMeta?.icon || 'brain',
+            skillsCount,
+          };
+          continue;
+        }
+
         const project = {
           name: `profile-${entry.name}`,
           path: profilePath,
-          displayName: entry.name.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          displayName: profileMeta?.name || entry.name.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
           fullPath: profilePath,
           isCustomName: false,
           isProfile: true,
           hasClaudeMd,
+          profileMeta: {
+            description: profileMeta?.description || '',
+            icon: profileMeta?.icon || 'brain',
+            skillsCount,
+          },
           sessions: [],
           sessionMeta: { hasMore: false, total: 0 },
           cursorSessions: [],

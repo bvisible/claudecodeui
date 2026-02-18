@@ -461,6 +461,22 @@ async function loadMcpConfig(cwd) {
       // ~/.claude/ directory doesn't exist — not an error
     }
 
+    // Source 3: {cwd}/.mcp.json (project-level MCP config, same as CLI)
+    if (cwd) {
+      try {
+        const projectMcpPath = path.join(cwd, '.mcp.json');
+        const content = await fs.readFile(projectMcpPath, 'utf8');
+        const parsed = JSON.parse(content);
+        if (parsed.mcpServers && typeof parsed.mcpServers === 'object') {
+          const count = Object.keys(parsed.mcpServers).length;
+          if (count > 0) {
+            Object.assign(mcpServers, parsed.mcpServers);
+            console.log(`Loaded ${count} MCP servers from ${projectMcpPath}`);
+          }
+        }
+      } catch { /* no .mcp.json in cwd */ }
+    }
+
     if (Object.keys(mcpServers).length === 0) {
       console.log('No MCP servers configured');
       return null;

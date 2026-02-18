@@ -105,11 +105,20 @@ export default function SidebarProjectList({
 
   const showProjects = !isLoading && projects.length > 0 && filteredProjects.length > 0;
 
+  // Sort profiles first, then regular projects
+  const sortedProjects = [...filteredProjects].sort((a, b) => {
+    const aIsProfile = Boolean(a.isProfile);
+    const bIsProfile = Boolean(b.isProfile);
+    if (aIsProfile && !bIsProfile) return -1;
+    if (!aIsProfile && bIsProfile) return 1;
+    return 0;
+  });
+
   return (
     <div className="md:space-y-1 pb-safe-area-inset-bottom">
       {!showProjects
         ? state
-        : filteredProjects.map((project) => (
+        : sortedProjects.map((project) => (
             <SidebarProjectItem
               key={project.name}
               project={project}

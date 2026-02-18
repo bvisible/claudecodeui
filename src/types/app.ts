@@ -30,6 +30,12 @@ export interface ProjectTaskmasterInfo {
   [key: string]: unknown;
 }
 
+export interface ProfileMeta {
+  description?: string;
+  icon?: string;
+  skillsCount?: number;
+}
+
 export interface Project {
   name: string;
   displayName: string;
@@ -40,6 +46,9 @@ export interface Project {
   codexSessions?: ProjectSession[];
   sessionMeta?: ProjectSessionMeta;
   taskmaster?: ProjectTaskmasterInfo;
+  isProfile?: boolean;
+  hasClaudeMd?: boolean;
+  profileMeta?: ProfileMeta;
   [key: string]: unknown;
 }
 

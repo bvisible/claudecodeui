@@ -1,5 +1,5 @@
 import { Button } from '../../../ui/button';
-import { Check, ChevronDown, ChevronRight, Edit3, Folder, FolderOpen, Star, Trash2, X } from 'lucide-react';
+import { Brain, Check, ChevronDown, ChevronRight, Edit3, Folder, FolderOpen, Server, Star, Trash2, Wrench, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 import { cn } from '../../../../lib/utils';
 import TaskIndicator from '../../../TaskIndicator';
@@ -50,6 +50,15 @@ type SidebarProjectItemProps = {
   t: TFunction;
 };
 
+// Map profile icon names to lucide components
+const PROFILE_ICONS: Record<string, typeof Brain> = {
+  brain: Brain,
+  wrench: Wrench,
+  server: Server,
+};
+
+const getProfileIcon = (iconName?: string) => PROFILE_ICONS[iconName || 'brain'] || Brain;
+
 const getSessionCountDisplay = (sessions: SessionWithProvider[], hasMoreSessions: boolean): string => {
   const sessionCount = sessions.length;
   if (hasMoreSessions && sessionCount >= 5) {
@@ -97,10 +106,12 @@ export default function SidebarProjectItem({
 }: SidebarProjectItemProps) {
   const isSelected = selectedProject?.name === project.name;
   const isEditing = editingProject === project.name;
+  const isProfile = Boolean(project.isProfile);
   const hasMoreSessions = project.sessionMeta?.hasMore === true;
   const sessionCountDisplay = getSessionCountDisplay(sessions, hasMoreSessions);
   const sessionCountLabel = `${sessionCountDisplay} session${sessions.length === 1 ? '' : 's'}`;
   const taskStatus = getTaskIndicatorStatus(project, mcpServerStatus);
+  const ProfileIcon = isProfile ? getProfileIcon(project.profileMeta?.icon) : null;
 
   const toggleProject = () => onToggleProject(project.name);
   const toggleStarProject = () => onToggleStarProject(project.name);
@@ -136,10 +147,14 @@ export default function SidebarProjectItem({
                 <div
                   className={cn(
                     'w-8 h-8 rounded-lg flex items-center justify-center transition-colors',
-                    isExpanded ? 'bg-primary/10' : 'bg-muted',
+                    isProfile
+                      ? 'bg-violet-500/10 dark:bg-violet-500/20'
+                      : isExpanded ? 'bg-primary/10' : 'bg-muted',
                   )}
                 >
-                  {isExpanded ? (
+                  {isProfile && ProfileIcon ? (
+                    <ProfileIcon className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+                  ) : isExpanded ? (
                     <FolderOpen className="w-4 h-4 text-primary" />
                   ) : (
                     <Folder className="w-4 h-4 text-muted-foreground" />
@@ -147,7 +162,7 @@ export default function SidebarProjectItem({
                 </div>
 
                 <div className="min-w-0 flex-1">
-                  {isEditing ? (
+                  {isEditing && !isProfile ? (
                     <input
                       type="text"
                       value={editingName}
@@ -184,14 +199,18 @@ export default function SidebarProjectItem({
                           />
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground">{sessionCountLabel}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {isProfile && project.profileMeta?.description
+                          ? project.profileMeta.description
+                          : sessionCountLabel}
+                      </p>
                     </>
                   )}
                 </div>
               </div>
 
               <div className="flex items-center gap-1">
-                {isEditing ? (
+                {isEditing && !isProfile ? (
                   <>
                     <button
                       className="w-8 h-8 rounded-lg bg-green-500 dark:bg-green-600 flex items-center justify-center active:scale-90 transition-all duration-150 shadow-sm active:shadow-none"
@@ -211,6 +230,21 @@ export default function SidebarProjectItem({
                     >
                       <X className="w-4 h-4 text-white" />
                     </button>
+                  </>
+                ) : isProfile ? (
+                  <>
+                    {project.profileMeta?.skillsCount ? (
+                      <span className="text-[10px] text-violet-600 dark:text-violet-400 font-medium px-1.5 py-0.5 rounded-full bg-violet-500/10">
+                        {project.profileMeta.skillsCount} skills
+                      </span>
+                    ) : null}
+                    <div className="w-6 h-6 rounded-md bg-muted/30 flex items-center justify-center">
+                      {isExpanded ? (
+                        <ChevronDown className="w-3 h-3 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="w-3 h-3 text-muted-foreground" />
+                      )}
+                    </div>
                   </>
                 ) : (
                   <>
@@ -283,13 +317,15 @@ export default function SidebarProjectItem({
           onClick={selectAndToggleProject}
         >
           <div className="flex items-center gap-3 min-w-0 flex-1">
-            {isExpanded ? (
+            {isProfile && ProfileIcon ? (
+              <ProfileIcon className="w-4 h-4 text-violet-600 dark:text-violet-400 flex-shrink-0" />
+            ) : isExpanded ? (
               <FolderOpen className="w-4 h-4 text-primary flex-shrink-0" />
             ) : (
               <Folder className="w-4 h-4 text-muted-foreground flex-shrink-0" />
             )}
             <div className="min-w-0 flex-1 text-left">
-              {isEditing ? (
+              {isEditing && !isProfile ? (
                 <div className="space-y-1">
                   <input
                     type="text"
@@ -317,12 +353,20 @@ export default function SidebarProjectItem({
                     {project.displayName}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    {sessionCountDisplay}
-                    {project.fullPath !== project.displayName && (
-                      <span className="ml-1 opacity-60" title={project.fullPath}>
-                        {' - '}
-                        {project.fullPath.length > 25 ? `...${project.fullPath.slice(-22)}` : project.fullPath}
+                    {isProfile && project.profileMeta?.description ? (
+                      <span className="text-violet-600/70 dark:text-violet-400/70">
+                        {project.profileMeta.description}
                       </span>
+                    ) : (
+                      <>
+                        {sessionCountDisplay}
+                        {project.fullPath !== project.displayName && (
+                          <span className="ml-1 opacity-60" title={project.fullPath}>
+                            {' - '}
+                            {project.fullPath.length > 25 ? `...${project.fullPath.slice(-22)}` : project.fullPath}
+                          </span>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -331,7 +375,7 @@ export default function SidebarProjectItem({
           </div>
 
           <div className="flex items-center gap-1 flex-shrink-0">
-            {isEditing ? (
+            {isEditing && !isProfile ? (
               <>
                 <div
                   className="w-6 h-6 text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20 flex items-center justify-center rounded cursor-pointer transition-colors"
@@ -351,6 +395,19 @@ export default function SidebarProjectItem({
                 >
                   <X className="w-3 h-3" />
                 </div>
+              </>
+            ) : isProfile ? (
+              <>
+                {project.profileMeta?.skillsCount ? (
+                  <span className="text-[10px] text-violet-600 dark:text-violet-400 font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+                    {project.profileMeta.skillsCount} skills
+                  </span>
+                ) : null}
+                {isExpanded ? (
+                  <ChevronDown className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                )}
               </>
             ) : (
               <>
