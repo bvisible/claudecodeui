@@ -126,7 +126,21 @@ export function useProjectsState({
     try {
       setIsLoadingProjects(true);
       const response = await api.projects();
+
+      if (!response.ok) {
+        // Auth failure or server error — keep projects as empty array
+        if (response.status === 401) {
+          console.error('Authentication required — please log in to Frappe');
+        }
+        return;
+      }
+
       const projectData = (await response.json()) as Project[];
+
+      if (!Array.isArray(projectData)) {
+        console.error('Expected array of projects');
+        return;
+      }
 
       setProjects((prevProjects) => {
         if (prevProjects.length === 0) {
