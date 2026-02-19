@@ -12,6 +12,60 @@ const __dirname = path.dirname(__filename);
 const router = express.Router();
 
 /**
+ * Scan skills directory for SKILL.md files inside subdirectories.
+ * Each subdirectory name becomes the command name (e.g., skills/workitem/SKILL.md → /workitem).
+ * @param {string} dir - Skills directory to scan (.claude/skills/)
+ * @param {string} namespace - Namespace for commands
+ * @returns {Promise<Array>} Array of command objects
+ */
+async function scanSkillsDirectory(dir, namespace) {
+  const commands = [];
+
+  try {
+    await fs.access(dir);
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+
+      const skillFile = path.join(dir, entry.name, 'SKILL.md');
+      try {
+        const content = await fs.readFile(skillFile, 'utf8');
+        const { data: frontmatter, content: commandContent } = matter(content);
+
+        let description = '';
+        if (frontmatter.description) {
+          // description may be a multiline string — use first line only
+          description = String(frontmatter.description).split('\n')[0].trim();
+        }
+        if (!description) {
+          const firstLine = commandContent.trim().split('\n')[0];
+          description = firstLine.replace(/^#+\s*/, '').trim();
+        }
+
+        commands.push({
+          name: `/${entry.name}`,
+          path: skillFile,
+          relativePath: `${entry.name}/SKILL.md`,
+          description,
+          namespace,
+          metadata: frontmatter,
+          isSkill: true,
+        });
+      } catch {
+        // No SKILL.md in this directory — skip
+      }
+    }
+  } catch (err) {
+    if (err.code !== 'ENOENT' && err.code !== 'EACCES') {
+      console.error(`Error scanning skills directory ${dir}:`, err.message);
+    }
+  }
+
+  return commands;
+}
+
+/**
  * Recursively scan directory for command files (.md)
  * @param {string} dir - Directory to scan
  * @param {string} baseDir - Base directory for relative paths
@@ -419,6 +473,13 @@ router.post('/list', async (req, res) => {
       allCommands.push(...projectCommands);
     }
 
+    // Scan project-level skills (.claude/skills/)
+    if (projectPath) {
+      const projectSkillsDir = path.join(projectPath, '.claude', 'skills');
+      const projectSkills = await scanSkillsDirectory(projectSkillsDir, 'project');
+      allCommands.push(...projectSkills);
+    }
+
     // Scan user-level commands (~/.claude/commands/)
     const homeDir = os.homedir();
     const userCommandsDir = path.join(homeDir, '.claude', 'commands');
@@ -428,6 +489,11 @@ router.post('/list', async (req, res) => {
       'user'
     );
     allCommands.push(...userCommands);
+
+    // Scan user-level skills (~/.claude/skills/)
+    const userSkillsDir = path.join(homeDir, '.claude', 'skills');
+    const userSkills = await scanSkillsDirectory(userSkillsDir, 'user');
+    allCommands.push(...userSkills);
 
     // Separate built-in and custom commands
     const customCommands = allCommands.filter(cmd => cmd.namespace !== 'builtin');
@@ -544,18 +610,28 @@ router.post('/execute', async (req, res) => {
     // Security: validate commandPath is within allowed directories
     {
       const resolvedPath = path.resolve(commandPath);
-      const userBase = path.resolve(path.join(os.homedir(), '.claude', 'commands'));
-      const projectBase = context?.projectPath
+      const homeDir = os.homedir();
+      const userCommandsBase = path.resolve(path.join(homeDir, '.claude', 'commands'));
+      const userSkillsBase = path.resolve(path.join(homeDir, '.claude', 'skills'));
+      const projectCommandsBase = context?.projectPath
         ? path.resolve(path.join(context.projectPath, '.claude', 'commands'))
+        : null;
+      const projectSkillsBase = context?.projectPath
+        ? path.resolve(path.join(context.projectPath, '.claude', 'skills'))
         : null;
       const isUnder = (base) => {
         const rel = path.relative(base, resolvedPath);
         return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
       };
-      if (!(isUnder(userBase) || (projectBase && isUnder(projectBase)))) {
+      const allowed =
+        isUnder(userCommandsBase) ||
+        isUnder(userSkillsBase) ||
+        (projectCommandsBase && isUnder(projectCommandsBase)) ||
+        (projectSkillsBase && isUnder(projectSkillsBase));
+      if (!allowed) {
         return res.status(403).json({
           error: 'Access denied',
-          message: 'Command must be in .claude/commands directory'
+          message: 'Command must be in .claude/commands or .claude/skills directory'
         });
       }
     }
