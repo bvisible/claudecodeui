@@ -628,8 +628,16 @@ async function getProjects(progressCallback = null) {
         } catch { /* no skills dir */ }
 
         // If this path was already discovered as a regular project (e.g. has sessions),
-        // upgrade it to a profile by merging profile metadata
-        const existingIdx = projects.findIndex(p => p.path === profilePath || p.fullPath === profilePath);
+        // upgrade it to a profile by merging profile metadata.
+        // Also match by encoded project name (e.g. -home-neoffice-nora-profiles-devops)
+        // because the fallback path decoder replaces ALL dashes with slashes, which breaks
+        // paths like /home/neoffice/nora-profiles/devops → /home/neoffice/nora/profiles/devops.
+        const encodedProfileName = profilePath.replace(/\//g, '-');
+        const existingIdx = projects.findIndex(p =>
+          p.path === profilePath ||
+          p.fullPath === profilePath ||
+          p.name === encodedProfileName
+        );
         if (existingIdx !== -1) {
           const existing = projects[existingIdx];
           existing.isProfile = true;
