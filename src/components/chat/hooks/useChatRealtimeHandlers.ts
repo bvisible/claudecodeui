@@ -858,42 +858,23 @@ export function useChatRealtimeHandlers({
           typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
         const abortedSessionId = latestMessage.sessionId || currentSessionId;
         const abortSucceeded = latestMessage.success !== false;
-        const abortReason = latestMessage.reason || 'user-abort';
 
         if (abortSucceeded) {
-          if (abortReason === 'user-interrupt') {
-            // Interrupt mode: a new message is about to be sent.
-            // Flush any pending stream data and finalize the partial response,
-            // but do NOT clear loading indicators (the new command handles them).
-            if (streamTimerRef.current) {
-              clearTimeout(streamTimerRef.current);
-              streamTimerRef.current = null;
-            }
-            const pendingChunk = streamBufferRef.current;
-            streamBufferRef.current = '';
-            if (pendingChunk) {
-              appendStreamingChunk(setChatMessages, pendingChunk, false);
-            }
-            finalizeStreamingMessage(setChatMessages);
-            setPendingPermissionRequests([]);
-          } else {
-            // Manual abort (Stop button): full cleanup
-            clearLoadingIndicators();
-            markSessionsAsCompleted(abortedSessionId, currentSessionId, selectedSession?.id, pendingSessionId);
-            if (pendingSessionId && (!abortedSessionId || pendingSessionId === abortedSessionId)) {
-              sessionStorage.removeItem('pendingSessionId');
-            }
-
-            setPendingPermissionRequests([]);
-            setChatMessages((previous) => [
-              ...previous,
-              {
-                type: 'assistant',
-                content: 'Session interrupted by user.',
-                timestamp: new Date(),
-              },
-            ]);
+          clearLoadingIndicators();
+          markSessionsAsCompleted(abortedSessionId, currentSessionId, selectedSession?.id, pendingSessionId);
+          if (pendingSessionId && (!abortedSessionId || pendingSessionId === abortedSessionId)) {
+            sessionStorage.removeItem('pendingSessionId');
           }
+
+          setPendingPermissionRequests([]);
+          setChatMessages((previous) => [
+            ...previous,
+            {
+              type: 'assistant',
+              content: 'Session interrupted by user.',
+              timestamp: new Date(),
+            },
+          ]);
         } else {
           setChatMessages((previous) => [
             ...previous,

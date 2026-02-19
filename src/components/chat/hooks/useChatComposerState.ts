@@ -131,6 +131,8 @@ export function useChatComposerState({
     ((event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>) => Promise<void>) | null
   >(null);
   const inputValueRef = useRef(input);
+  // Queue for messages submitted while Claude is processing (like Claude Code CLI)
+  const queuedMessageRef = useRef<string | null>(null);
 
   const handleBuiltInCommand = useCallback(
     (result: CommandExecutionResult) => {
@@ -476,32 +478,27 @@ export function useChatComposerState({
         return;
       }
 
-      // If Claude is currently processing, abort the active query first then send the new message.
-      // This enables "interrupt & continue" — the user can type and send while Claude works.
+      // If Claude is currently processing, queue the message to send after completion.
+      // Like Claude Code CLI: message is displayed immediately but sent when Claude finishes.
       if (isLoading) {
-        const pendingSessionId =
-          typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
-        const candidateSessionIds = [
-          currentSessionId,
-          pendingViewSessionRef.current?.sessionId || null,
-          pendingSessionId,
-          selectedSession?.id || null,
-        ];
-        const targetSessionId =
-          candidateSessionIds.find(
-            (sid) => Boolean(sid) && !isTemporarySessionId(sid),
-          ) || null;
-
-        if (targetSessionId) {
-          sendMessage({
-            type: 'abort-session',
-            sessionId: targetSessionId,
-            provider,
-            reason: 'user-interrupt',
-          });
-          // Brief delay to let abort propagate before sending the new command
-          await new Promise((resolve) => setTimeout(resolve, 150));
+        queuedMessageRef.current = currentInput;
+        const userMessage: ChatMessage = {
+          type: 'user',
+          content: currentInput,
+          timestamp: new Date(),
+        };
+        setChatMessages((previous) => [...previous, userMessage]);
+        setInput('');
+        inputValueRef.current = '';
+        resetCommandMenuState();
+        setAttachedImages([]);
+        setUploadingImages(new Map());
+        setImageErrors(new Map());
+        setIsTextareaExpanded(false);
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
         }
+        return;
       }
 
       // If input is a custom slash command, expand the skill content before submitting.
@@ -707,6 +704,25 @@ export function useChatComposerState({
   useEffect(() => {
     handleSubmitRef.current = handleSubmit;
   }, [handleSubmit]);
+
+  // Auto-send queued message when Claude finishes processing
+  useEffect(() => {
+    if (!isLoading && queuedMessageRef.current) {
+      const queuedContent = queuedMessageRef.current;
+      queuedMessageRef.current = null;
+      // Small delay to let claude-complete fully process before sending new command
+      const timer = setTimeout(() => {
+        // Set the input and trigger submit programmatically
+        setInput(queuedContent);
+        inputValueRef.current = queuedContent;
+        // Use handleSubmitRef to call the latest version of handleSubmit
+        if (handleSubmitRef.current) {
+          handleSubmitRef.current(createFakeSubmitEvent());
+        }
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading]);
 
   useEffect(() => {
     inputValueRef.current = input;
