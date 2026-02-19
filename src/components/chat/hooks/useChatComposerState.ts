@@ -353,6 +353,7 @@ export function useChatComposerState({
   );
 
   const {
+    slashCommands,
     slashCommandsCount,
     filteredCommands,
     frequentCommands,
@@ -473,6 +474,19 @@ export function useChatComposerState({
       const currentInput = inputValueRef.current;
       if (!currentInput.trim() || isLoading || !selectedProject) {
         return;
+      }
+
+      // If input is a custom slash command, expand the skill content before submitting.
+      if (currentInput.trim().startsWith('/')) {
+        const parts = currentInput.trim().split(/\s+/);
+        const cmdName = parts[0];
+        const matchingCmd = slashCommands.find(
+          (cmd) => cmd.name === cmdName && cmd.type === 'custom',
+        );
+        if (matchingCmd) {
+          await executeCommand(matchingCmd);
+          return; // executeCommand → handleCustomCommand will re-trigger handleSubmit with expanded content
+        }
       }
 
       let messageContent = currentInput;
@@ -641,6 +655,7 @@ export function useChatComposerState({
       codexModel,
       currentSessionId,
       cursorModel,
+      executeCommand,
       isLoading,
       onSessionActive,
       pendingViewSessionRef,
@@ -656,6 +671,7 @@ export function useChatComposerState({
       setClaudeStatus,
       setIsLoading,
       setIsUserScrolledUp,
+      slashCommands,
       thinkingMode,
     ],
   );

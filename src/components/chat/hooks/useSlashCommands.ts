@@ -209,6 +209,13 @@ export function useSlashCommands({
       setInput(newInput);
       resetCommandMenuState();
 
+      // Custom commands (skills) need arguments — just insert the name and let user type args.
+      // Built-in commands execute immediately since they don't require arguments.
+      if (command.type === 'custom') {
+        textareaRef.current?.focus();
+        return;
+      }
+
       const executionResult = onExecuteCommand(command);
       if (isPromiseLike(executionResult)) {
         executionResult.catch(() => {
@@ -216,7 +223,7 @@ export function useSlashCommands({
         });
       }
     },
-    [input, slashPosition, setInput, resetCommandMenuState, onExecuteCommand],
+    [input, slashPosition, setInput, resetCommandMenuState, onExecuteCommand, textareaRef],
   );
 
   const handleCommandSelect = useCallback(
@@ -231,6 +238,17 @@ export function useSlashCommands({
       }
 
       trackCommandUsage(command);
+
+      // Custom commands (skills) need arguments — just insert the name and let user type args.
+      // Built-in commands execute immediately since they don't require arguments.
+      if (command.type === 'custom') {
+        const textBeforeSlash = slashPosition >= 0 ? input.slice(0, slashPosition) : '';
+        setInput(`${textBeforeSlash}${command.name} `);
+        resetCommandMenuState();
+        textareaRef.current?.focus();
+        return;
+      }
+
       const executionResult = onExecuteCommand(command);
 
       if (isPromiseLike(executionResult)) {
@@ -244,7 +262,7 @@ export function useSlashCommands({
         resetCommandMenuState();
       }
     },
-    [selectedProject, trackCommandUsage, onExecuteCommand, resetCommandMenuState],
+    [selectedProject, trackCommandUsage, onExecuteCommand, resetCommandMenuState, input, slashPosition, setInput, textareaRef],
   );
 
   const handleToggleCommandMenu = useCallback(() => {
