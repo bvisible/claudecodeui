@@ -642,6 +642,9 @@ async function getProjects(progressCallback = null) {
           const existing = projects[existingIdx];
           existing.isProfile = true;
           existing.hasClaudeMd = hasClaudeMd;
+          // Fix path in case the fallback decoder mangled dashes (e.g. nora-profiles → nora/profiles)
+          existing.path = profilePath;
+          existing.fullPath = profilePath;
           existing.displayName = profileMeta?.name || existing.displayName;
           existing.profileMeta = {
             description: profileMeta?.description || '',
