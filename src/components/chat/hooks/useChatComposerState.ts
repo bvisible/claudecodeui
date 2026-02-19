@@ -472,8 +472,36 @@ export function useChatComposerState({
     ) => {
       event.preventDefault();
       const currentInput = inputValueRef.current;
-      if (!currentInput.trim() || isLoading || !selectedProject) {
+      if (!currentInput.trim() || !selectedProject) {
         return;
+      }
+
+      // If Claude is currently processing, abort the active query first then send the new message.
+      // This enables "interrupt & continue" — the user can type and send while Claude works.
+      if (isLoading) {
+        const pendingSessionId =
+          typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
+        const candidateSessionIds = [
+          currentSessionId,
+          pendingViewSessionRef.current?.sessionId || null,
+          pendingSessionId,
+          selectedSession?.id || null,
+        ];
+        const targetSessionId =
+          candidateSessionIds.find(
+            (sid) => Boolean(sid) && !isTemporarySessionId(sid),
+          ) || null;
+
+        if (targetSessionId) {
+          sendMessage({
+            type: 'abort-session',
+            sessionId: targetSessionId,
+            provider,
+            reason: 'user-interrupt',
+          });
+          // Brief delay to let abort propagate before sending the new command
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
       }
 
       // If input is a custom slash command, expand the skill content before submitting.
@@ -851,6 +879,7 @@ export function useChatComposerState({
       type: 'abort-session',
       sessionId: targetSessionId,
       provider,
+      reason: 'user-abort',
     });
   }, [canAbortSession, currentSessionId, pendingViewSessionRef, provider, selectedSession?.id, sendMessage]);
 

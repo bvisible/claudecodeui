@@ -920,16 +920,41 @@ function handleChatConnection(ws) {
                 console.log('Project:', data.options?.projectPath || 'Unknown');
                 console.log('Session:', data.options?.sessionId ? 'Resume' : 'New');
 
-                // Use Claude Agents SDK
-                await queryClaudeSDK(data.command, data.options, writer);
+                // Auto-abort previous active query if one exists on this connection
+                if (ws._activeQuery) {
+                    const prevSessionId = ws._activeQuery.sessionId;
+                    if (prevSessionId) {
+                        console.log('[DEBUG] Auto-aborting previous query for session:', prevSessionId);
+                        try {
+                            await abortClaudeSDKSession(prevSessionId);
+                        } catch (abortErr) {
+                            console.error('[WARN] Failed to abort previous query:', abortErr.message);
+                        }
+                    }
+                }
+
+                // Start query without blocking — allows processing subsequent messages (interrupt & continue)
+                const queryPromise = queryClaudeSDK(data.command, data.options, writer);
+                ws._activeQuery = { promise: queryPromise, sessionId: data.options?.sessionId };
+                queryPromise
+                    .catch((error) => {
+                        console.error('[ERROR] Claude query failed:', error.message);
+                        writer.send({ type: 'error', error: error.message });
+                    })
+                    .finally(() => {
+                        if (ws._activeQuery?.promise === queryPromise) {
+                            ws._activeQuery = null;
+                        }
+                    });
             } else if (data.type === 'abort-session') {
-                console.log('[DEBUG] Abort session request:', data.sessionId);
+                console.log('[DEBUG] Abort session request:', data.sessionId, 'reason:', data.reason || 'user-abort');
                 const success = await abortClaudeSDKSession(data.sessionId);
                 writer.send({
                     type: 'session-aborted',
                     sessionId: data.sessionId,
                     provider: 'claude',
-                    success
+                    success,
+                    reason: data.reason || 'user-abort'
                 });
             } else if (data.type === 'claude-permission-response') {
                 // Relay UI approval decisions back into the SDK control flow
